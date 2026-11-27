@@ -83,6 +83,11 @@ struct PlannerTaskRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            // One VoiceOver element: the decorative icons and indicator
+            // merge into the button's explicit label (EntryRow merges at
+            // the row; this row keeps three separate controls, so the
+            // merge lives on the name control, not the row).
+            .accessibilityElement(children: .combine)
             .accessibilityLabel(Self.accessibilityLabel(task: task, categories: categories))
             .accessibilityIdentifier("PlannerName-\(task.id)")
 

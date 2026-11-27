@@ -23,16 +23,21 @@ Planner rows never feed History, Insights, or Recents.
    clears the draft without losing the keyboard.
 4. The user toggles a task done (it stays in position through its
    completion day), taps a task to edit it in the sheet (name plus
-   ordered categories), drags it to a new position in edit
+   ordered categories plus notes), drags it to a new position in edit
    mode (VoiceOver rotor included), or swipes a Mail-style
    delete/complete pill (shake-to-undo restores deletes via the system
-   Undo confirmation).
+   Undo confirmation). Rows show their ordered category icons and a
+   notes indicator when non-empty (VoiceOver announces both); the
+   running task reads `In progress` instead of Start.
 5. The user taps Start on an open task when no timer is active: a task
    holding categories starts with exactly those; a task without
    categories falls back to the ordinary exact-text Recents inheritance.
-   The run starts on Track with that task linked. Stopping saves the
-   entry and completes exactly that task; the Track counts refresh in
-   place with no further navigation.
+   The task's notes ride the draft too. The run starts on Track with
+   that task linked. While linked, category and notes edits converge
+   live in both directions (Track retag/notes reach the task; sheet
+   saves on the running task reach the draft; the locked name never
+   moves). Stopping saves the entry and completes exactly that task;
+   the Track counts refresh in place with no further navigation.
 
 ## Screen: PlannerView
 
@@ -90,27 +95,40 @@ untouched: the only Track change is the toolbar progress item.
 
 ### Rows
 
-Each row: completion toggle → name → Start affordance slot (always
-mounted in both states — completed rows hide it via
-`PlannerStartSlot.hiddenPreservingLayout`, preserving the exact row
-height so toggling completion moves no sibling; open-task taps Start
-unless a run is active).
+Each row: completion toggle → name (with ordered category icons and the
+notes indicator inline) → Start affordance slot (always mounted in every
+state — completed rows and the running row hide the button via
+`PlannerStartSlot`, preserving the exact row height so toggling
+completion moves no sibling; the running row layers the localized
+`In progress` label over the same footprint instead of Start).
 
 - Toggle: `circle` / `checkmark.circle.fill` (accent when done),
   `accessibilityLabel` `L10n.plannerMarkDone` / `L10n.plannerReopen`,
   `PlannerToggle-<id>`. Completed names render secondary + strikethrough
   and stay in position through their completion day.
-- Name: tap opens the task editor sheet (Name + ordered Categories in
-  Log Time sheet grammar, reduced to those two fields; `L10n.plannerAdd`
-  precedent for the Add accessibility path does not apply here — the row
-  never renames inline). The sheet saves the name and the set as
-  independent field intents, so a name-only edit sends no categories and
-  a tag-only edit sends no name.
+- Name: tap opens the task editor sheet (Name + ordered Categories +
+  Notes in Log Time sheet grammar, reduced to those three fields in that
+  order; the notes row is a presenter pushing the shared
+  `NotesEditorPage` with copy-on-open X/✓ semantics. The sheet saves the
+  name, the set, and the notes as independent field intents, so a
+  name-only edit sends no categories and a notes-only edit sends no
+  name; the 2000-trimmed-rune notes bound gates Save like the Log Time
+  form.
   (`PlannerName-<id>`; sheet: `PlannerEditorNameField`,
-  `PlannerEditorCategories`, `PlannerEditorSaveButton`).
+  `PlannerEditorCategories`, `PlannerEditorNotesField`,
+  `PlannerEditorSaveButton`). The name control's VoiceOver label folds
+  in the ordered category names and the notes presence
+  (`L10n.historyHasNotes`); icons and the indicator are decorative.
+- Categories/notes affordances: ordered category icons (the catalog
+  display symbol per id, unknown ids drop) and, when the trimmed notes
+  are non-empty, a `note.text` indicator — both inline after the name in
+  the single-line layout, so no state changes the row height. VoiceOver
+  announces both through the name control's label.
 - Start: bordered `L10n.timerStart` (the ordinary Start string — there is
   no separate Track completion control), `PlannerStart-<id>`. Hidden for
-  completed rows.
+  completed rows. While the task carries the active linked run the slot
+  shows the localized `In progress` label (`L10n.plannerInProgress`,
+  `PlannerInProgress-<id>`) instead — same footprint, no Start button.
 - Swipes (Mail-style icon+text pills): trailing-side Delete
   (`L10n.entryDeleteConfirm`, `trash`, danger tint, full-swipe deletes)
   into the durable undo buffer (no outbox row yet); leading-side
@@ -157,13 +175,24 @@ construction). `accessibilityIdentifier`: `PlannerProgressControl`.
   it, so Track shows actual counts on first paint from warm local data.
 - [x] Completing/reopening keeps position and never touches timers or
   entries; identical names stay independent.
-- [x] The editor sheet edits the name and the ordered category set as
-  independent field intents (Log Time sheet grammar, same field
-  order/cards/validation); invalid saves keep the sheet open with the
-  draft intact.
+- [x] The editor sheet edits the name, the ordered category set, and the
+  notes as independent field intents (Log Time sheet grammar, same field
+  order/cards/validation — Name, then Categories, then a presenter
+  pushing the shared notes editor); invalid and over-limit saves keep
+  the sheet open with the draft intact.
 - [x] Start uses the task's categories when non-empty, else exact-text
-  Recents inheritance; persists the task id via the claim-guarded draft,
-  and pops to Track; a second Start returns false with no replacement.
+  Recents inheritance, and copies the task notes into the draft;
+  persists the task id via the claim-guarded draft, and pops to Track;
+  a second Start returns false with no replacement. While linked, Track
+  retag/notes edits write through to the task and sheet saves on the
+  running task write through to the draft, each in the same chokepoint
+  transaction (locked name untouched); pending-notes review, retry,
+  backdate, and Live Activity Stop paths are preserved.
+- [x] Rows show ordered category icons and the notes indicator inline
+  (VoiceOver announces both) and read the localized `In progress` label
+  over the preserved Start slot while the task carries the run; open,
+  completed, and running rows share one exact height (Reduce Motion
+  respected).
 - [x] A linked Stop invalidates the planner projection, so the Track
   counts refresh in place; ordinary Stop posts nothing and is unchanged.
 - [x] The progress icon follows completion (`checklist.unchecked` /

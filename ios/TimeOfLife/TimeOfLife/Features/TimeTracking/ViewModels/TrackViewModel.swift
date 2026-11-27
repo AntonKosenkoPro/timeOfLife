@@ -53,6 +53,17 @@ final class TrackViewModel: ObservableObject {
     /// publish nothing, so no-op sync cycles render literally nothing
     /// (steady-track-launch).
     private var lastSnapshot: TrackSnapshot?
+    /// Notification surface for the sheet-converged draft reload
+    /// (day-planner 15.2). Production uses `.default`; tests inject a
+    /// private center so global posts cannot reload VMs under test.
+    private let notifications: NotificationCenter
+    /// Event-driven reload for sheet-converged drafts (day-planner 15.2):
+    /// the editor sheet converged the linked run behind this view model,
+    /// so the posted event invalidates the stale in-memory snapshot and
+    /// the guarded reload republishes the converged tags and notes.
+    /// Subscribed here — not in the view — so the path is unit-testable
+    /// (History/planner precedent).
+    private var draftConvergedCancellables = Set<AnyCancellable>()
     /// Whether a first snapshot has been applied (preloaded adoption or a
     /// completed load, success or failure alike). Gates the name row until
     /// the screen has something true to show.
@@ -132,12 +143,15 @@ final class TrackViewModel: ObservableObject {
         service: TimerService,
         connectivity: Connectivity,
         now: @escaping () -> Date = Date.init,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        notifications: NotificationCenter = .default
     ) {
         self.service = service
         self.connectivity = connectivity
         self.nowProvider = now
         self.calendar = calendar
+        self.notifications = notifications
+        observeDraftConvergence()
     }
 
     /// App-owned now for views (the Started caption, the start editor): the
@@ -328,6 +342,18 @@ final class TrackViewModel: ObservableObject {
     /// Call on tab return, Profile exit, and sync-cycle exit.
     func invalidate() {
         needsReload = true
+    }
+
+    /// Subscribes the sheet-converged draft reload (day-planner 15.2).
+    private func observeDraftConvergence() {
+        notifications.publisher(for: .plannerDraftConverged)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.invalidate()
+                    await self?.loadIfNeeded()
+                }
+            }
+            .store(in: &draftConvergedCancellables)
     }
 
     private func storeRecents() async throws -> [ExactName] {

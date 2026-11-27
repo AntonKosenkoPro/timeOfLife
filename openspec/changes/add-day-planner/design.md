@@ -42,6 +42,34 @@ Pull account-scoped pages in revision order, not display order or `updated_at` o
 - **Date boundary or travel** → completion date is fixed; today is local to each device, so devices on different dates may temporarily show different completed rows. Unfinished tasks remain visible on both.
 - **Extra relay state** → account-scoped revisions, delete markers and receipts trade storage for durable replay and ordering. Index the bounded page query and cascade all planner data on account deletion; do not time-expire markers or receipts in v1.
 
+## Duplication assessment (day-planner §15.3)
+
+`PlannerTask` and `RunningTimerDraft` overlap on exactly three fields
+(name/`activity_text`, ordered `categoryIDs`, `notes` — `TimeEntry` owns
+the same three). A shared value type with mapping at the boundary was
+assessed and rejected, for concrete reasons:
+
+- The Codable shapes are load-bearing contracts: the relay wire format
+  (`PlannerTask` ↔ `PlannerTaskWireDTO` ↔ OpenAPI), the transactional
+  outbox payloads (`PlannerOperationPayload`, `TimeEntry`), and the
+  durable undo snapshots all decode by flat key. Embedding a shared
+  struct changes the key nesting unless every container hand-rolls a
+  flattened `Codable` — which keeps the duplication while adding a
+  mapping layer, not removing it.
+- The lifecycles never coincide: the task is synced, identity-bearing
+  (`id`, `positionKey`, `completedOn`), and survives Stop; the draft is
+  a local-only singleton (`startedAt`, `status`, `plannerTaskID`) that
+  Stop clears. No call site can hold "either" — every reader needs the
+  wrapper's own fields, so a shared inner type saves no branches.
+- `TimeEntry` would have to join for the abstraction to be complete,
+  tripling the blast radius (entry writes, entry outbox, History,
+  search, Insights) for zero behavior gain.
+
+The models stay separate; convergence lives in the chokepoint methods
+(`updateRunningDraftCategories/Notes`, `savePlannerTaskSheet`), which
+are the only place the overlap is named. Revisit if a fourth owner of
+the triple appears.
+
 ## Migration Plan
 
 Use additive PostgreSQL/SQLite migrations, including cascading account ownership, and an additive account-file migration that leaves existing notes, entries, categories and active drafts intact. Existing drafts acquire no planner link. Deploy relay support first. Against a pre-planner or rolled-back relay, an unsupported planner route leaves planner writes queued and ordinary sync usable. Rollback redeploys the prior image without dropping new tables or changing old endpoint shapes; verify account purge still cascades planner data on that image. No on-disk compatibility decoder or import from the closed prototype.

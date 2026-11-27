@@ -371,15 +371,19 @@ final class PlannerViewModel: ObservableObject {
             // A save on the running task converged its draft in the same
             // transaction (day-planner 15.2) — re-mirror the Live Activity
             // chips from the new set (mid-run retag refreshes chips in
-            // place). The ticker and the locked name are untouched.
+            // place) and tell Track to reload, converging its in-memory
+            // snapshot (tags, notes editor baseline) with no navigation.
+            // The ticker and the locked name are untouched.
             if let draft = try await store.timerDraft(),
-               draft.plannerTaskID == task.id,
-               let startedAt = draft.startedAt {
-                await timer.refreshLiveActivity(
-                    text: draft.activityText,
-                    categoryIDs: draft.categoryIDs,
-                    startedAt: startedAt
-                )
+               draft.plannerTaskID == task.id {
+                if let startedAt = draft.startedAt {
+                    await timer.refreshLiveActivity(
+                        text: draft.activityText,
+                        categoryIDs: draft.categoryIDs,
+                        startedAt: startedAt
+                    )
+                }
+                notifications.post(name: .plannerDraftConverged, object: nil)
             }
             editingTask = nil
             errorMessage = nil

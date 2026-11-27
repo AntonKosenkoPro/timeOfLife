@@ -92,6 +92,7 @@ extension AppContainer {
         seedTrackCategoriesIfNeeded(screen: screen, localStore: localStore)
         seedPlannerHeadersIfNeeded(screen: screen, localStore: localStore)
         seedPlannerWarmIfNeeded(screen: screen, localStore: localStore)
+        seedPlannerNotesIfNeeded(screen: screen, localStore: localStore)
         seedZhFitIfNeeded(screen: screen, localStore: localStore)
         seedDeletionEvidence(keychain: keychain)
     }
@@ -100,6 +101,15 @@ extension AppContainer {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
             .appendingPathComponent(LocalStore.databaseFileName(userID: userID))
+    }
+
+    /// The signed-in shell with an empty navigation path (the stub Track
+    /// root shared by the planner probes; seeding is per-screen).
+    private static func signInShell(sessionStore: SessionStore, navigation: AppNavigationStack) {
+        sessionStore.setSignedIn(CachedSession(
+            id: "ui-test", email: "user@example.com", emailVerified: true
+        ))
+        navigation.path = []
     }
 
     /// Places the app on a specific screen for inspection.
@@ -139,17 +149,13 @@ extension AppContainer {
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
             navigation.path = []
-        case "plannerWarm":
-            // Day-planner §12 probe (true pills, top prepend, instant
-            // counts): the signed-in shell plus three seeded Today tasks
-            // (two open, one completed today → counts "1 of 3"), so the
-            // probe can read real counts on first paint, submit on top,
-            // and swipe both pill edges. Seeded task text is fixture copy,
-            // never user data.
-            sessionStore.setSignedIn(CachedSession(
-                id: "ui-test", email: "user@example.com", emailVerified: true
-            ))
-            navigation.path = []
+        case "plannerWarm", "plannerNotes":
+            // Day-planner probes on the signed-in shell; seeding is
+            // per-screen (`seedPlannerWarmIfNeeded` plants §12's three
+            // tasks for "plannerWarm"; `seedPlannerNotesIfNeeded` plants
+            // §15's tagged + annotated pair for "plannerNotes"). Seeded
+            // text is fixture copy, never user data.
+            signInShell(sessionStore: sessionStore, navigation: navigation)
         case "trackCategories":
             // Deterministic running-track fixture: the shell opens on Track
             // with a running draft (see `seedTrackCategoriesIfNeeded`).
@@ -284,6 +290,63 @@ extension AppContainer {
                 }
             } catch {
                 seedLogger.error("UITest seed: plannerWarm threw: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// One tagged + annotated task and one bare task for the
+    /// `"plannerNotes"` screen (day-planner §15 probe): "Note Alpha"
+    /// carries the "Desk Work" set and a seeded note, "Note Beta" is bare
+    /// (the probe Starts it for the linked run). The category id is fixed
+    /// so the probe can address its Track chip by identifier. Same
+    /// degrade-to-probe-failure policy as the other seeds.
+    private static func seedPlannerNotesIfNeeded(screen: String, localStore: LocalStore) {
+        guard screen == "plannerNotes" else { return }
+        Task {
+            do {
+                let workID: String
+                if let existing = try await localStore.category(named: "Desk Work") {
+                    workID = existing.id
+                } else {
+                    workID = "uitest-note-work"
+                    do {
+                        try await localStore.createCategory(Category(
+                            id: workID, name: "Desk Work", icon: "briefcase"
+                        ))
+                    } catch {
+                        seedLogger.error("UITest seed: plannerNotes category failed: \(error.localizedDescription, privacy: .public)")
+                        return
+                    }
+                }
+                for (id, name, key) in [
+                    ("uitest-note-alpha", "Note Alpha", "500000"),
+                    ("uitest-note-beta", "Note Beta", "500001"),
+                ] as [(String, String, String)] {
+                    let result = try await localStore.createPlannerTask(
+                        id: id, name: name, positionKey: key,
+                        operationID: UUID().uuidString
+                    )
+                    guard case .saved = result else {
+                        seedLogger.error("UITest seed: plannerNotes task failed: \(name, privacy: .public)")
+                        return
+                    }
+                }
+                guard case .saved = try await localStore.retagPlannerTask(
+                    id: "uitest-note-alpha", categoryIDs: [workID],
+                    operationID: UUID().uuidString
+                ) else {
+                    seedLogger.error("UITest seed: plannerNotes retag failed")
+                    return
+                }
+                guard case .saved = try await localStore.setPlannerTaskNotes(
+                    id: "uitest-note-alpha", notes: "seeded note",
+                    operationID: UUID().uuidString
+                ) else {
+                    seedLogger.error("UITest seed: plannerNotes notes failed")
+                    return
+                }
+            } catch {
+                seedLogger.error("UITest seed: plannerNotes threw: \(error.localizedDescription, privacy: .public)")
             }
         }
     }

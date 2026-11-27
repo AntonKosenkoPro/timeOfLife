@@ -124,6 +124,59 @@ struct TimerLinkedConvergenceTests {
         #expect(try await store.outboxRows().count == 1)
     }
 
+    @Test("a sheet save on the running task reloads Track in place")
+    func sheetSaveReloadsTrackInPlace() async throws {
+        // Production pair on a private center (linked-stop precedent):
+        // Track holds a stale in-memory snapshot while the sheet save
+        // converges the store behind it; the posted event must reload
+        // Track with no test-side reload.
+        let center = NotificationCenter()
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        let service = TimerService(store: store, liveActivities: FakeLiveActivities(), notifications: center)
+        _ = try await store.createPlannerTask(
+            id: "task-1", name: "Read", positionKey: "500000",
+            operationID: UUID().uuidString
+        )
+        _ = try await service.startLinkedTask(
+            name: "Read", categoryIDs: [], notes: "", taskID: "task-1", startedAt: Date()
+        )
+        let trackVM = TrackViewModel(
+            service: service,
+            connectivity: MockConnectivity(connected: true),
+            notifications: center
+        )
+        await trackVM.loadIfNeeded()
+        guard case .running = trackVM.state else {
+            Issue.record("Track is not running after the linked Start")
+            return
+        }
+        #expect(trackVM.state.draft?.notes.isEmpty == true)
+
+        let plannerVM = PlannerViewModel(
+            store: store,
+            undoBuffer: UndoBufferStore(store: store),
+            timer: service,
+            notifications: center
+        )
+        await plannerVM.loadIfNeeded()
+        plannerVM.beginEdit(try #require(try await store.plannerTask(id: "task-1")))
+        plannerVM.sheetNotes = "live note"
+        #expect(await plannerVM.saveSheet())
+
+        // Track converges with no test-side reload: the stale in-memory
+        // snapshot republishes the converged notes (and only the notes —
+        // the ticker anchor and locked name are untouched).
+        let running = try #require(trackVM.state.startedAt)
+        let deadline = Date().addingTimeInterval(3)
+        while trackVM.state.draft?.notes != "live note", Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        #expect(trackVM.state.draft?.notes == "live note")
+        #expect(trackVM.state.draft?.text == "Read")
+        #expect(trackVM.state.startedAt == running)
+    }
+
     // MARK: - Helpers
 
     private func makeService() -> TimerService {

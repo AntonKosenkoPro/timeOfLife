@@ -11,7 +11,7 @@ import Foundation
 struct PlannerTaskSheetTests {
     @Test("sheet notes-only edit sends only the notes intent")
     func sheetNotesOnlyEditSendsOnlyNotes() async throws {
-        let (vm, store) = await makeContext()
+        let (vm, store, _) = await makeContext()
         await vm.loadIfNeeded()
         vm.draft = "A"
         await vm.submit()
@@ -36,7 +36,7 @@ struct PlannerTaskSheetTests {
 
     @Test("sheet edit carries notes alongside rename and retag")
     func sheetEditCarriesNotes() async throws {
-        let (vm, store) = await makeContext(categories: [("c1", "Work")])
+        let (vm, store, _) = await makeContext(categories: [("c1", "Work")])
         await vm.loadIfNeeded()
         vm.draft = "A"
         await vm.submit()
@@ -56,7 +56,7 @@ struct PlannerTaskSheetTests {
 
     @Test("sheet blocks over-limit notes with the draft intact")
     func sheetBlocksOverLimitNotes() async throws {
-        let (vm, store) = await makeContext()
+        let (vm, store, _) = await makeContext()
         await vm.loadIfNeeded()
         vm.draft = "A"
         await vm.submit()
@@ -80,7 +80,13 @@ struct PlannerTaskSheetTests {
 
     @Test("sheet save on the running task converges the draft (task to draft)")
     func sheetSaveWritesThroughToDraft() async throws {
-        let (vm, store) = await makeContext(categories: [("c1", "Work"), ("c2", "Gym")])
+        let (vm, store, center) = await makeContext(categories: [("c1", "Work"), ("c2", "Gym")])
+        final class Flag: @unchecked Sendable { var fired = false }
+        let flag = Flag()
+        let token = center.addObserver(
+            forName: .plannerDraftConverged, object: nil, queue: nil
+        ) { _ in flag.fired = true }
+        defer { center.removeObserver(token) }
         await vm.loadIfNeeded()
         vm.draft = "A"
         await vm.submit()
@@ -113,11 +119,15 @@ struct PlannerTaskSheetTests {
         // The task carries the rename; no entry changed.
         #expect(try await store.plannerTask(id: task.id)?.name == "Zed")
         #expect(try await store.entries().isEmpty)
+        // The converging save tells Track to reload (a name-only save on
+        // an unlinked task posts nothing — covered by the sheet-only tests
+        // above staying silent on the default center).
+        #expect(flag.fired)
     }
 
     @Test("start copies task notes into the running draft")
     func startCopiesNotes() async throws {
-        let (vm, store) = await makeContext()
+        let (vm, store, _) = await makeContext()
         await vm.loadIfNeeded()
         vm.draft = "A"
         await vm.submit()
@@ -131,7 +141,7 @@ struct PlannerTaskSheetTests {
 
     @Test("the running task reads its link for the In progress row")
     func runningTaskExposesLink() async throws {
-        let (vm, _) = await makeContext()
+        let (vm, _, _) = await makeContext()
         await vm.loadIfNeeded()
         #expect(vm.linkedTaskID == nil)
         vm.draft = "A"
@@ -152,18 +162,23 @@ struct PlannerTaskSheetTests {
 
     private func makeContext(
         categories: [(id: String, name: String)] = []
-    ) async -> (vm: PlannerViewModel, store: LocalStore) {
+    ) async -> (vm: PlannerViewModel, store: LocalStore, center: NotificationCenter) {
         // swiftlint:disable:next force_try
         let store = try! LocalStore(url: temporaryStoreURL())
         for (id, name) in categories {
             _ = try? await store.createCategory(Category(id: id, name: name, icon: CatalogIcon.tag.rawValue))
         }
+        // Private center (linked-stop precedent): the converging saveSheet
+        // posts `.plannerDraftConverged` here, never on `.default`, so no
+        // parallel Track-view-model test can observe a stray reload.
+        let center = NotificationCenter()
         let vm = PlannerViewModel(
             store: store,
             undoBuffer: UndoBufferStore(store: store),
-            timer: TimerService(store: store)
+            timer: TimerService(store: store),
+            notifications: center
         )
-        return (vm, store)
+        return (vm, store, center)
     }
 
     private func temporaryStoreURL() -> URL {

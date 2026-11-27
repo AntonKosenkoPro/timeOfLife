@@ -139,34 +139,41 @@ struct PlannerTaskEditorSheet: View {
     /// preview (placeholder when empty) — that pushes the shared
     /// `NotesEditorPage` (copy-on-open: X discards, ✓ writes
     /// `vm.sheetNotes` only and the validity gate re-evaluates).
+    /// Full-card push, mirroring the Name card: the link owns the padded
+    /// chrome so caption, chevron, preview, blank, and padding all push.
+    /// No FormCard tap-away here — it would consume those taps (Log Time
+    /// notes-presenter precedent).
     private var notesCard: some View {
-        FormCard(accessibilityID: "PlannerEditorNotesRow", resignFocus: focusedField = nil) {
-            NavigationLink {
-                NotesEditorPage(initialText: vm.sheetNotes, entryName: vm.sheetName) { vm.sheetNotes = $0 }
-            } label: {
-                VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-                    HStack(spacing: Theme.spacingSmall) {
-                        Text(L10n.entryNotesLabel.text)
-                            .font(.caption)
-                            .foregroundStyle(Theme.textSecondary)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Theme.textSecondary)
-                            .accessibilityHidden(true)
-                    }
-                    Text(vm.sheetNotes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.sheetNotes)
-                        .font(.body)
-                        .lineLimit(1...5)
-                        .foregroundStyle(vm.sheetNotes.isEmpty ? Theme.textSecondary : Theme.textPrimary)
-                        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea, alignment: .leading)
+        NavigationLink {
+            NotesEditorPage(initialText: vm.sheetNotes, entryName: vm.sheetName) { vm.sheetNotes = $0 }
+        } label: {
+            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                HStack(spacing: Theme.spacingSmall) {
+                    Text(L10n.entryNotesLabel.text)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .accessibilityHidden(true)
                 }
+                Text(vm.sheetNotes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.sheetNotes)
+                    .font(.body)
+                    .lineLimit(1...5)
+                    .foregroundStyle(vm.sheetNotes.isEmpty ? Theme.textSecondary : Theme.textPrimary)
+                    .frame(maxWidth: .infinity, minHeight: Theme.minTapArea, alignment: .leading)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(L10n.entryNotesLabel.text)
-            .accessibilityValue(vm.sheetNotes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.sheetNotes)
-            .accessibilityIdentifier("PlannerEditorNotesField")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Theme.spacingMedium)
+            .background(Theme.backgroundSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L10n.entryNotesLabel.text)
+        .accessibilityValue(vm.sheetNotes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.sheetNotes)
+        .accessibilityIdentifier("PlannerEditorNotesRow")
     }
 
     private var errorSection: some View {

@@ -346,4 +346,12 @@ extension Notification.Name {
     /// the Track progress control refreshes in place with no navigation.
     /// Ordinary stops carry no link and post nothing.
     static let plannerLinkedStopCommitted = Notification.Name("plannerLinkedStopCommitted")
+
+    /// Posted (in-process) after an editor-sheet save converges a linked
+    /// run's draft in the same chokepoint transaction (day-planner 15.2):
+    /// the running draft's live categories/notes changed behind the Track
+    /// view model, so Track observes this and reloads, converging its
+    /// in-memory snapshot (tags, notes editor baseline) with no
+    /// navigation. Unlinked saves post nothing.
+    static let plannerDraftConverged = Notification.Name("plannerDraftConverged")
 }
