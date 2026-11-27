@@ -1,6 +1,16 @@
 ## ADDED Requirements
 
-### Requirement: Planner tasks persist independently per account
+### Requirement: Running draft and linked task converge live
+
+While a run is linked to a planner task, category and notes edits SHALL converge live in both directions between the running draft and the task in the same chokepoint transaction; the locked timer name SHALL NOT change.
+
+#### Scenario: Track retag writes through to the task
+- **WHEN** the user toggles categories while the linked timer runs
+- **THEN** the same transaction updates the running draft and the planner task, and the task queues its field update
+
+#### Scenario: Sheet save writes through to the draft
+- **WHEN** the user saves category or notes changes on the running task
+- **THEN** the same transaction updates the task and the running draft with the ticker and locked name untouched
 
 The account store SHALL hold planner records and their pending mutations independently of entries and categories. Planner mutations SHALL use the transactional outbox and existing durable deletion/undo contract. Planner records SHALL NOT feed History, Insights, or Recents. The timer draft's optional linked task ID SHALL be local, not part of any synced entry.
 

@@ -5,7 +5,8 @@ Lifio can tell users what they tracked, but they have to keep today's priorities
 ## What Changes
 
 - Add a dedicated Today planner reachable from a compact progress control on Track. Keep the three tabs and the existing Start/Stop presentation.
-- Let users add, rename, reorder, complete, reopen, and delete tasks carrying a name plus optional categories. Return prepends and keeps the keyboard open; matching Recents fill the input without submitting it.
+- Let users add, rename, reorder, complete, reopen, and delete tasks carrying a name, optional categories, and notes. Return prepends and keeps the keyboard open; matching Recents fill the input without submitting it.
+- Editing a task's categories or notes while its timer runs updates the live timer draft, and timer-side edits flow back to the planner task; rows show category icons, a notes indicator, and an `In progress` label for the running task.
 - Show unfinished tasks automatically on every subsequent day until completed or deleted. Completed tasks stay in position through their completion day. There is no tomorrow view, manual rollover, or midnight write.
 - Start an open task in one tap when the device has no active timer. A successful Stop from Track or its Live Activity saves time and completes that exact task; ordinary timers are unchanged. Defer a separate Track completion control.
 - Make planner tasks account-bound, usable offline, and synced between devices without making them History entries, categories, or synced timer drafts.
