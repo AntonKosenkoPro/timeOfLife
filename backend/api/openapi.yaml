@@ -1989,11 +1989,12 @@ components:
       type: string
       description: |
         Field-specific planner mutation. `create` sets the initial name,
-        position, and optional categories; `rename` sets only the name;
-        `move` sets only the position key; `complete` sets only the
+        position, and optional categories and notes; `rename` sets only the
+        name; `move` sets only the position key; `complete` sets only the
         completion date; `reopen` clears it; `retag` replaces the ordered
-        category set; `delete` writes a terminal deletion marker.
-      enum: [create, rename, move, complete, reopen, delete, retag]
+        category set; `notes` replaces the task notes; `delete` writes a
+        terminal deletion marker.
+      enum: [create, rename, move, complete, reopen, delete, retag, notes]
 
     PlannerOperationRequest:
       type: object
@@ -2057,6 +2058,14 @@ components:
             (the initial set, defaulting to empty); ignored otherwise. Every
             id must be a valid UUID; unknown ids are kept and pruned at Stop
             (no catalog existence check, unlike entry `category_ids`).
+        notes:
+          type: string
+          maxLength: 2000
+          description: |
+            Free-text notes for the task. Required for `notes` (a full
+            replace — an empty string clears the notes); optional for `create`
+            (the initial notes, defaulting to empty); ignored otherwise. The
+            bound counts trimmed runes, shared with entry notes.
       example:
         operation_id: "019639f1-7a3b-7abc-9def-100000000011"
         task_id: "019639f1-7a3b-7abc-9def-100000000010"
@@ -2074,7 +2083,8 @@ components:
         marker (converge by dropping the local copy — it never clears).
         `completed_on` is the civil date recorded by the completing device.
         `category_ids` is the ordered tag set used at Start (empty when the
-        task carries none — Recents fallback applies).
+        task carries none — Recents fallback applies). `notes` is the
+        optional free-text note, copied into the running draft at Start.
       required:
         - id
         - name
@@ -2104,6 +2114,10 @@ components:
             type: string
             format: uuid
           description: Ordered category tags for the task; empty when none.
+        notes:
+          type: string
+          maxLength: 2000
+          description: Free-text notes for the task; empty when none.
         revision:
           type: integer
           minimum: 1

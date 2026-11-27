@@ -155,6 +155,44 @@ func TestPostgres_PlannerRetagParity(t *testing.T) {
 	}
 }
 
+func TestPostgres_PlannerNotesParity(t *testing.T) {
+	store := newParityStore(t)
+	ctx := context.Background()
+	uid := parityPlannerUser(t, store, "pg-planner-notes@example.com")
+
+	// Create with initial notes, then replace: the TEXT column round-trips
+	// on Postgres exactly like SQLite.
+	name, key, initial := "Read", "500000", "chapter 3"
+	task, created, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: uuidV7(), Intent: PlannerIntentCreate,
+		Name: &name, PositionKey: &key, Notes: &initial,
+	})
+	if err != nil || !created {
+		t.Fatalf("create with notes: %+v %v %v", task, created, err)
+	}
+	if task.Notes != initial {
+		t.Fatalf("create must carry the initial notes, got %+v", task)
+	}
+	replacement := "chapter 4"
+	noted, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: task.ID, Intent: PlannerIntentNotes,
+		Notes: &replacement,
+	})
+	if err != nil {
+		t.Fatalf("notes: %v", err)
+	}
+	if noted.Revision != 2 || noted.Notes != replacement {
+		t.Fatalf("notes must replace the text, got %+v", noted)
+	}
+	tasks, wm, _, err := store.ListPlannerFeed(ctx, uid, 0, 50)
+	if err != nil {
+		t.Fatalf("feed: %v", err)
+	}
+	if wm != 2 || len(tasks) != 1 || tasks[0].Notes != replacement {
+		t.Fatalf("feed must carry the notes, got wm=%d %+v", wm, tasks)
+	}
+}
+
 func TestPostgres_PlannerPurgeCascades(t *testing.T) {
 	store := newParityStore(t)
 	ctx := context.Background()

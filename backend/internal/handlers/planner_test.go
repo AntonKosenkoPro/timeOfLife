@@ -13,6 +13,7 @@ type plannerResp struct {
 	PositionKey string   `json:"position_key"`
 	CompletedOn *string  `json:"completed_on"`
 	CategoryIDs []string `json:"category_ids"`
+	Notes       string   `json:"notes"`
 	Revision    int64    `json:"revision"`
 	Deleted     bool     `json:"deleted"`
 }
@@ -21,6 +22,16 @@ type plannerResp struct {
 func plannerOp(t *testing.T, h *Handler, tok string, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
 	return serve(h, jsonReq(t, "POST", "/api/v1/planner/operations", tok, body))
+}
+
+// repeatPlannerRune renders n Cyrillic runes (multi-byte, one rune each —
+// the relay gates trimmed rune counts, not bytes).
+func repeatPlannerRune(n int) string {
+	s := ""
+	for i := 0; i < n; i++ {
+		s += "я"
+	}
+	return s
 }
 
 func TestPlanner_CreateValidation(t *testing.T) {
@@ -44,6 +55,8 @@ func TestPlanner_CreateValidation(t *testing.T) {
 		{"retag without set", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "retag"}, "category_ids"},
 		{"retag bad category id", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "retag", "category_ids": []any{"nope"}}, "category_ids"},
 		{"retag blank category id", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "retag", "category_ids": []any{""}}, "category_ids"},
+		{"notes without text", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "notes"}, "notes"},
+		{"create bad notes id", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "create", "name": "Read", "position_key": "500000", "notes": repeatPlannerRune(2001)}, "notes"},
 		{"complete without date", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "complete"}, "completed_on"},
 		{"complete bad date", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "complete", "completed_on": "2026-02-30"}, "completed_on"},
 		{"complete datetime", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "complete", "completed_on": "2026-11-25T10:00:00Z"}, "completed_on"},
@@ -233,6 +246,121 @@ func TestPlanner_RetagFlow(t *testing.T) {
 	}
 }
 
+// Task notes share the 2000-trimmed-rune bound with entry notes: the
+// `notes` intent replaces the text with its own revision, a create carries
+// optional initial notes, and 2001 trimmed runes fail with the same message.
+func TestPlanner_NotesFlow(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	opID, taskID := v7(), v7()
+
+	// Create with initial notes: the response carries them.
+	w := plannerOp(t, h, tok, map[string]any{
+		"operation_id": opID, "task_id": taskID,
+		"intent": "create", "name": "Read", "position_key": "500000",
+		"notes": "chapter 3",
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	var created plannerResp
+	decodeBody(t, w, &created)
+	if created.Notes != "chapter 3" {
+		t.Fatalf("create must carry the initial notes: %+v", created)
+	}
+	// A bare create defaults to empty notes.
+	w = plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": v7(),
+		"intent": "create", "name": "Plain", "position_key": "500001",
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("bare create: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	var plain plannerResp
+	decodeBody(t, w, &plain)
+	if plain.Notes != "" {
+		t.Fatalf("bare create must default to empty notes: %+v", plain)
+	}
+
+	// Notes replaces the text with its own revision; a retag composes after.
+	w = plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": taskID,
+		"intent": "notes", "notes": "chapter 4",
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("notes: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	var noted plannerResp
+	decodeBody(t, w, &noted)
+	if noted.Revision != 3 || noted.Notes != "chapter 4" {
+		t.Fatalf("notes must replace the text: %+v", noted)
+	}
+	if noted.Name != "Read" || len(noted.CategoryIDs) != 0 {
+		t.Fatalf("notes must leave name and categories untouched: %+v", noted)
+	}
+	// An empty notes intent clears the text (full replace, not a merge).
+	w = plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": taskID,
+		"intent": "notes", "notes": "",
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("clear notes: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	var cleared plannerResp
+	decodeBody(t, w, &cleared)
+	if cleared.Notes != "" || cleared.Revision != 4 {
+		t.Fatalf("empty notes must clear the text: %+v", cleared)
+	}
+
+	// 2000 trimmed runes pass; 2001 fail with the entry-notes message;
+	// surrounding whitespace is free.
+	w = plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": taskID,
+		"intent": "notes", "notes": repeatPlannerRune(2000),
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("2000-rune notes: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	w = plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": taskID,
+		"intent": "notes", "notes": repeatPlannerRune(2001),
+	})
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("2001-rune notes: expected 422, got %d (%s)", w.Code, w.Body.String())
+	}
+	var bound struct {
+		Error struct {
+			Code    string            `json:"code"`
+			Details map[string]string `json:"details"`
+		} `json:"error"`
+	}
+	decodeBody(t, w, &bound)
+	if bound.Error.Code != "validation_error" || bound.Error.Details["notes"] != "Notes must be 2000 characters or fewer" {
+		t.Fatalf("expected the entry-notes bound message, got %+v", bound)
+	}
+	w = plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": taskID,
+		"intent": "notes", "notes": "  " + repeatPlannerRune(2000) + "  ",
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("padded 2000-rune notes: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	// Notes after delete is terminally refused, like every other field op.
+	w = plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": taskID, "intent": "delete",
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("delete: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	w = plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": taskID,
+		"intent": "notes", "notes": "stale",
+	})
+	if w.Code != http.StatusGone || errCode(t, w) != "planner_gone" {
+		t.Fatalf("notes after delete: expected 410 planner_gone, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
 func TestPlanner_ConflictDetailsCarryCategories(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 	taskID, catA := v7(), v7()
@@ -240,14 +368,14 @@ func TestPlanner_ConflictDetailsCarryCategories(t *testing.T) {
 	w := plannerOp(t, h, tok, map[string]any{
 		"operation_id": v7(), "task_id": taskID,
 		"intent": "create", "name": "Read", "position_key": "500000",
-		"category_ids": []any{catA},
+		"category_ids": []any{catA}, "notes": "chapter 3",
 	})
 	if w.Code != http.StatusCreated {
 		t.Fatalf("create: expected 201, got %d", w.Code)
 	}
 	// A racing create under a different operation id collides; the 409
 	// details carry the server's ordered set comma-joined so the device
-	// adopts it losslessly.
+	// adopts it losslessly, plus the server notes verbatim.
 	w = plannerOp(t, h, tok, map[string]any{
 		"operation_id": v7(), "task_id": taskID,
 		"intent": "create", "name": "Other", "position_key": "500001",
@@ -267,6 +395,9 @@ func TestPlanner_ConflictDetailsCarryCategories(t *testing.T) {
 	}
 	if conflict.Error.Details["category_ids"] != catA {
 		t.Fatalf("409 details must carry the server set, got %v", conflict.Error.Details)
+	}
+	if conflict.Error.Details["notes"] != "chapter 3" {
+		t.Fatalf("409 details must carry the server notes, got %v", conflict.Error.Details)
 	}
 }
 

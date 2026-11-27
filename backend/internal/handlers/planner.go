@@ -43,9 +43,12 @@ func (h *Handler) writePlannerStoreErr(w http.ResponseWriter, r *http.Request, e
 				// ordered set travels comma-joined (UUIDs never contain a
 				// comma) and parses back losslessly.
 				"category_ids": strings.Join(task.CategoryIDs, ","),
-				"deleted":      strconv.FormatBool(task.Deleted),
-				"created_at":   task.CreatedAt.UTC().Format(time.RFC3339Nano),
-				"updated_at":   task.UpdatedAt.UTC().Format(time.RFC3339Nano),
+				// Notes travel verbatim (the details map is strings-only
+				// and notes are already text); empty stays empty.
+				"notes":      task.Notes,
+				"deleted":    strconv.FormatBool(task.Deleted),
+				"created_at": task.CreatedAt.UTC().Format(time.RFC3339Nano),
+				"updated_at": task.UpdatedAt.UTC().Format(time.RFC3339Nano),
 			})
 	case errors.Is(err, db.ErrPlannerGone):
 		writeError(w, http.StatusGone, codePlannerGone,
@@ -63,6 +66,7 @@ type plannerOperationReq struct {
 	PositionKey *string   `json:"position_key"`
 	CompletedOn *string   `json:"completed_on"`
 	CategoryIDs *[]string `json:"category_ids"`
+	Notes       *string   `json:"notes"`
 }
 
 // validatePlannerDate reports whether s is a real civil calendar date
@@ -121,10 +125,19 @@ func (h *Handler) ApplyPlannerOperation(w http.ResponseWriter, r *http.Request) 
 		} else {
 			validatePlannerCategoryIDs(*req.CategoryIDs, errs)
 		}
+	case db.PlannerIntentNotes:
+		if req.Notes == nil {
+			errs.add("notes", "notes is required")
+		} else {
+			// The shared 2000-trimmed-rune bound with entry notes
+			// (entries-owned-fields F1/U1): the relay trims only to
+			// gate, storing the text verbatim.
+			validateNotes(*req.Notes, errs)
+		}
 	case db.PlannerIntentReopen, db.PlannerIntentDelete:
 		// No fields required; extras are ignored.
 	default:
-		errs.add("intent", "intent must be one of create, rename, move, complete, reopen, delete, retag")
+		errs.add("intent", "intent must be one of create, rename, move, complete, reopen, delete, retag, notes")
 	}
 	if req.PositionKey != nil && (req.Intent == db.PlannerIntentCreate || req.Intent == db.PlannerIntentMove) {
 		k := strings.TrimSpace(*req.PositionKey)
@@ -134,11 +147,15 @@ func (h *Handler) ApplyPlannerOperation(w http.ResponseWriter, r *http.Request) 
 			req.PositionKey = &k
 		}
 	}
-	// `create` accepts an optional initial category set (the repush path
-	// re-posts the live task with its tags); `retag` already validated its
-	// required set above. Anything else ignores extras.
+	// `create` accepts an optional initial category set and optional
+	// initial notes (the repush path re-posts the live task with both);
+	// `retag`/`notes` already validated their required fields above.
+	// Anything else ignores extras.
 	if req.Intent == db.PlannerIntentCreate && req.CategoryIDs != nil {
 		validatePlannerCategoryIDs(*req.CategoryIDs, errs)
+	}
+	if req.Intent == db.PlannerIntentCreate && req.Notes != nil {
+		validateNotes(*req.Notes, errs)
 	}
 	if !errs.ok() {
 		writeValidation(w, errs)
@@ -157,6 +174,7 @@ func (h *Handler) ApplyPlannerOperation(w http.ResponseWriter, r *http.Request) 
 		PositionKey: req.PositionKey,
 		CompletedOn: req.CompletedOn,
 		CategoryIDs: categories,
+		Notes:       req.Notes,
 	}
 	task, isNew, err := h.store.ApplyPlannerOperation(r.Context(), userID, op)
 	if err != nil {

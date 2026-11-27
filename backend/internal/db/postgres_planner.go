@@ -14,14 +14,17 @@ import (
 
 // pgScanPlannerTask scans one planner task row (without user_id) into a
 // PlannerTask. completed_on arrives as a civil date (or NULL when open);
-// category_ids arrives as a JSON array TEXT (or NULL on pre-012 rows).
+// category_ids arrives as a JSON array TEXT (or NULL on pre-012 rows);
+// notes arrives as TEXT (or NULL on pre-013 rows — defaulting to empty, so
+// old rows never fail the read).
 func pgScanPlannerTask(sc pgxScanner, userID string) (PlannerTask, error) {
 	var (
 		t           PlannerTask
 		completedOn *time.Time
 		categories  *string
+		notes       *string
 	)
-	if err := sc.Scan(&t.ID, &t.Name, &t.PositionKey, &completedOn, &categories, &t.Revision, &t.CreatedAt, &t.UpdatedAt, &t.Deleted); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &t.PositionKey, &completedOn, &categories, &notes, &t.Revision, &t.CreatedAt, &t.UpdatedAt, &t.Deleted); err != nil {
 		return PlannerTask{}, err
 	}
 	t.UserID = userID
@@ -34,6 +37,9 @@ func pgScanPlannerTask(sc pgxScanner, userID string) (PlannerTask, error) {
 		raw = *categories
 	}
 	t.CategoryIDs = parsePlannerCategoryIDs(raw)
+	if notes != nil {
+		t.Notes = *notes
+	}
 	return t, nil
 }
 
@@ -41,7 +47,7 @@ func (s *PostgresStore) pgGetPlannerTask(ctx context.Context, q interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }, userID, id string) (PlannerTask, error) {
 	task, err := pgScanPlannerTask(q.QueryRow(ctx, `
-		SELECT id, name, position_key, completed_on, category_ids, revision, created_at, updated_at, deleted
+		SELECT id, name, position_key, completed_on, category_ids, notes, revision, created_at, updated_at, deleted
 		FROM planner_tasks
 		WHERE user_id = $1 AND id = $2
 	`, userID, id), userID)
@@ -144,6 +150,10 @@ func (s *PostgresStore) ApplyPlannerOperation(ctx context.Context, userID string
 
 	now := time.Now().UTC()
 	var result PlannerTask
+	opNotes := ""
+	if op.Notes != nil {
+		opNotes = *op.Notes
+	}
 	switch op.Intent {
 	case PlannerIntentCreate:
 		if known {
@@ -153,9 +163,9 @@ func (s *PostgresStore) ApplyPlannerOperation(ctx context.Context, userID string
 			return existing, false, fmt.Errorf("planner create: %w", ErrPlannerConflict)
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO planner_tasks (user_id, id, name, position_key, completed_on, category_ids, revision, created_at, updated_at, deleted)
+			INSERT INTO planner_tasks (user_id, id, name, position_key, completed_on, category_ids, notes, revision, created_at, updated_at, deleted)
 			VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $7, false)
-		`, userID, op.TaskID, *op.Name, *op.PositionKey, encodePlannerCategoryIDs(op.CategoryIDs), next, now); err != nil {
+		`, userID, op.TaskID, *op.Name, *op.PositionKey, encodePlannerCategoryIDs(op.CategoryIDs), opNotes, next, now); err != nil {
 			if pgIsUniqueViolation(err) {
 				// A concurrent create won the race after our receipt
 				// succeeded: the winner carries a different operation id
@@ -171,7 +181,7 @@ func (s *PostgresStore) ApplyPlannerOperation(ctx context.Context, userID string
 			}
 			return PlannerTask{}, false, fmt.Errorf("planner create: %w", err)
 		}
-	case PlannerIntentRename, PlannerIntentMove, PlannerIntentComplete, PlannerIntentReopen, PlannerIntentRetag:
+	case PlannerIntentRename, PlannerIntentMove, PlannerIntentComplete, PlannerIntentReopen, PlannerIntentRetag, PlannerIntentNotes:
 		if !known {
 			return PlannerTask{}, false, fmt.Errorf("planner update: %w", ErrNotFound)
 		}
@@ -190,6 +200,8 @@ func (s *PostgresStore) ApplyPlannerOperation(ctx context.Context, userID string
 			set, arg = "completed_on = NULL", nil
 		case PlannerIntentRetag:
 			set, arg = "category_ids = $3", encodePlannerCategoryIDs(op.CategoryIDs)
+		case PlannerIntentNotes:
+			set, arg = "notes = $3", opNotes
 		}
 		var tag pgconn.CommandTag
 		if op.Intent == PlannerIntentReopen {
@@ -262,7 +274,7 @@ func (s *PostgresStore) ListPlannerFeed(ctx context.Context, userID string, afte
 		return nil, 0, false, fmt.Errorf("planner watermark: %w", err)
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, position_key, completed_on, category_ids, revision, created_at, updated_at, deleted
+		SELECT id, name, position_key, completed_on, category_ids, notes, revision, created_at, updated_at, deleted
 		FROM planner_tasks
 		WHERE user_id = $1 AND revision > $2 AND revision <= $3
 		ORDER BY revision ASC

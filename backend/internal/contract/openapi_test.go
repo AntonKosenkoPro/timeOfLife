@@ -850,8 +850,8 @@ func TestSpec_PlannerContractDocumented(t *testing.T) {
 	if !ok {
 		t.Fatal("expected PlannerIntent schema")
 	}
-	if len(intent.Enum) != 7 {
-		t.Errorf("PlannerIntent must declare the 7 field-specific intents, got %v", intent.Enum)
+	if len(intent.Enum) != 8 {
+		t.Errorf("PlannerIntent must declare the 8 field-specific intents, got %v", intent.Enum)
 	}
 
 	req, ok := s.Components.Schemas["PlannerOperationRequest"]
@@ -872,15 +872,31 @@ func TestSpec_PlannerContractDocumented(t *testing.T) {
 			t.Errorf("PlannerOperationRequest must document %q", field)
 		}
 	}
+	for _, field := range []string{"name", "position_key", "completed_on", "category_ids", "notes"} {
+		if _, ok := req.Properties[field]; !ok {
+			t.Errorf("PlannerOperationRequest must document %q", field)
+		}
+	}
 
 	task, ok := s.Components.Schemas["PlannerTask"]
 	if !ok {
 		t.Fatal("expected PlannerTask schema")
 	}
-	for _, field := range []string{"id", "name", "position_key", "category_ids", "revision", "updated_at", "deleted"} {
+	for _, field := range []string{"id", "name", "position_key", "category_ids", "notes", "revision", "updated_at", "deleted"} {
 		if _, ok := task.Properties[field]; !ok {
 			t.Errorf("PlannerTask must document %q", field)
 		}
+	}
+	notesProp, ok := task.Properties["notes"]
+	if !ok {
+		t.Fatal("expected PlannerTask.notes schema")
+	}
+	notesMap, ok := notesProp.(map[string]any)
+	if !ok {
+		t.Fatalf("PlannerTask.notes must be a schema object, got %T", notesProp)
+	}
+	if maxLen, ok := notesMap["maxLength"].(int); !ok || maxLen != 2000 {
+		t.Errorf("PlannerTask.notes must pin maxLength 2000, got %+v", notesMap)
 	}
 
 	feed, ok := s.Components.Schemas["PlannerFeedResponse"]

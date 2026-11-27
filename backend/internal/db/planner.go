@@ -14,7 +14,8 @@ import (
 // Planner task intents. Each operation carries only its intent's field: a
 // rename sends no position or completion, and a Stop-driven completion sends
 // only the completion date. `create` sets the initial name, position, and
-// optional categories; `retag` replaces the ordered category set.
+// optional categories and notes; `retag` replaces the ordered category set;
+// `notes` replaces the task notes.
 const (
 	PlannerIntentCreate   = "create"
 	PlannerIntentRename   = "rename"
@@ -23,13 +24,16 @@ const (
 	PlannerIntentReopen   = "reopen"
 	PlannerIntentDelete   = "delete"
 	PlannerIntentRetag    = "retag"
+	PlannerIntentNotes    = "notes"
 )
 
 // PlannerTask is the latest accepted state of one planner task. CompletedOn
 // is the civil date (YYYY-MM-DD) recorded by the completing device, or nil
 // when open. CategoryIDs is the optional ordered set of category ids used
 // at Start (empty when the task carries none — Recents fallback applies).
-// Revision is the commit-ordered per-account sequence number of
+// Notes is the optional free-text note (the same 2000-trimmed-rune bound as
+// entry notes), copied into the running draft at Start. Revision is the
+// commit-ordered per-account sequence number of
 // the last accepted operation on this task. Deleted marks the terminal
 // deletion marker — it never clears.
 type PlannerTask struct {
@@ -39,6 +43,7 @@ type PlannerTask struct {
 	PositionKey string    `json:"position_key"`
 	CompletedOn *string   `json:"completed_on"`
 	CategoryIDs []string  `json:"category_ids"`
+	Notes       string    `json:"notes"`
 	Revision    int64     `json:"revision"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -55,6 +60,7 @@ type PlannerOperation struct {
 	PositionKey *string
 	CompletedOn *string
 	CategoryIDs []string
+	Notes       *string
 }
 
 // ---------- Planner category set ----------

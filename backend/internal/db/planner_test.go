@@ -264,6 +264,107 @@ func TestPlanner_RetagOwnRevision(t *testing.T) {
 	}
 }
 
+func TestPlanner_NotesOwnRevision(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	uid := plannerUser(t, store, "planner-notes@example.com")
+
+	// Create with initial notes: the response and the feed both carry them.
+	name, key, initial := "Read", "500000", "chapter 3"
+	created, isNew, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: uuidV7(), Intent: PlannerIntentCreate,
+		Name: &name, PositionKey: &key, Notes: &initial,
+	})
+	if err != nil || !isNew {
+		t.Fatalf("create with notes: %v %v", created, err)
+	}
+	if created.Notes != initial {
+		t.Fatalf("create must carry the initial notes, got %+v", created)
+	}
+	// A bare create defaults to empty notes.
+	plain := plannerCreate(t, store, uid, "Plain", "500001")
+	if plain.Notes != "" {
+		t.Fatalf("bare create must default to empty notes, got %+v", plain)
+	}
+
+	// Notes replaces the text with its own revision (per-account
+	// revision 3 — the bare create above consumed 2), leaving the
+	// name, position, and categories untouched.
+	replacement := "chapter 4, then 5"
+	noted, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: created.ID, Intent: PlannerIntentNotes,
+		Notes: &replacement,
+	})
+	if err != nil {
+		t.Fatalf("notes: %v", err)
+	}
+	if noted.Revision != 3 || noted.Notes != replacement {
+		t.Fatalf("notes must replace the text with its own revision, got %+v", noted)
+	}
+	if noted.Name != "Read" || noted.PositionKey != "500000" || len(noted.CategoryIDs) != 0 {
+		t.Fatalf("notes must leave name, position, and categories untouched, got %+v", noted)
+	}
+	// An empty notes intent clears the notes (full replace, not a merge).
+	empty := ""
+	cleared, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: created.ID, Intent: PlannerIntentNotes,
+		Notes: &empty,
+	})
+	if err != nil || cleared.Notes != "" || cleared.Revision != 4 {
+		t.Fatalf("empty notes must clear the text, got %+v %v", cleared, err)
+	}
+	// A later retag composes: the cleared notes stay cleared.
+	cat := uuidV7()
+	retagged, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: created.ID, Intent: PlannerIntentRetag,
+		CategoryIDs: []string{cat},
+	})
+	if err != nil || len(retagged.CategoryIDs) != 1 || retagged.Notes != "" {
+		t.Fatalf("retag must compose with the notes clear, got %+v %v", retagged, err)
+	}
+	// The feed carries the latest notes per task.
+	tasks, wm, _, err := store.ListPlannerFeed(ctx, uid, 0, 50)
+	if err != nil {
+		t.Fatalf("feed: %v", err)
+	}
+	if wm != 5 {
+		t.Fatalf("expected watermark 5, got %d", wm)
+	}
+	for _, task := range tasks {
+		if task.ID == created.ID && (task.Notes != "" || len(task.CategoryIDs) != 1) {
+			t.Fatalf("feed must carry the latest notes state, got %+v", task)
+		}
+	}
+}
+
+func TestPlanner_NotesTerminalAndUnknown(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	uid := plannerUser(t, store, "planner-notes-terminal@example.com")
+
+	task := plannerCreate(t, store, uid, "Read", "500000")
+	if _, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: task.ID, Intent: PlannerIntentDelete,
+	}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	// A notes intent on the terminal marker is terminally refused.
+	text := "stale"
+	if _, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: task.ID, Intent: PlannerIntentNotes,
+		Notes: &text,
+	}); !errors.Is(err, ErrPlannerGone) {
+		t.Fatalf("expected ErrPlannerGone for notes after delete, got %v", err)
+	}
+	// Unknown ids are 404, not 410.
+	if _, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: uuidV7(), Intent: PlannerIntentNotes,
+		Notes: &text,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for unknown notes, got %v", err)
+	}
+}
+
 func TestPlanner_RetagTerminalAndUnknown(t *testing.T) {
 	store := setupTestStore(t)
 	ctx := context.Background()
