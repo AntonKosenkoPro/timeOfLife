@@ -349,7 +349,7 @@
 "profile.versionInternalSuffix" = "Internal";
 
 // Day planner (add-day-planner)
-"planner.title" = "今天";
+"planner.title" = "我的一天";
 "planner.progressLabel" = "已完成 %1$d，共 %2$d";
 "planner.emptyHint" = "添加的任务会显示在这里，直到完成。";
 "planner.inProgress" = "进行中";

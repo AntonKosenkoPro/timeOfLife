@@ -349,7 +349,7 @@
 "profile.versionInternalSuffix" = "Internal";
 
 // Day planner (add-day-planner)
-"planner.title" = "Hoje";
+"planner.title" = "Meu dia";
 "planner.progressLabel" = "Concluído %1$d de %2$d";
 "planner.emptyHint" = "As tarefas adicionadas aparecem aqui até serem concluídas.";
 "planner.inProgress" = "Em andamento";

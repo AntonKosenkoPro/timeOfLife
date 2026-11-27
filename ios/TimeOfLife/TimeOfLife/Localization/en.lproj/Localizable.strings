@@ -351,7 +351,7 @@
 "catalogIcon.tag" = "Tag";
 
 // Day planner (add-day-planner)
-"planner.title" = "Today";
+"planner.title" = "My Day";
 "planner.progressLabel" = "Done %1$d of %2$d";
 "planner.emptyHint" = "Tasks you add show up here until done.";
 "planner.inProgress" = "In progress";

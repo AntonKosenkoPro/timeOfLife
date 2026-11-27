@@ -19,17 +19,20 @@ Planner rows never feed History, Insights, or Recents.
    clears, and the field keeps focus with the keyboard open for the next
    task. A matching Recent tap fills the exact text for editing or
    submission and stages that Recent's full category set for the created
-   task — no task is created, no timer starts; the line then shows only
-   the selected chip until typing resumes, and submitting creates the
-   task with the staged set. A draft matching
+   task — no task is created, no timer starts (the tap plays the
+   selection haptic); the line then shows only the selected chip in the
+   filled-accent selected presentation until typing resumes, and
+   submitting creates the task with the staged set (the save plays the
+   success haptic). A draft matching
    nothing shows the no-match placeholder in the chips line; the ×
    clears the draft (and any staged set) without losing the keyboard.
 4. The user toggles a task done (it stays in position through its
-   completion day), taps a task to edit it in the sheet (name plus
+   completion day), taps an open task to edit it in the sheet (name plus
    ordered categories plus notes — the manual entry form minus Start/End),
    drags it to a new position in edit mode (VoiceOver rotor included),
    or swipes a Mail-style delete/complete pill (shake-to-undo restores
-   deletes via the system Undo confirmation). Rows show their ordered
+   deletes via the system Undo confirmation). Completed taps are a no-op
+   and the running task offers no delete. Rows show their ordered
    categories as small icon+name chips under the name and a notes
    indicator trailing the chips (VoiceOver announces name, then
    categories, then notes); the running task reads the accent-colored
@@ -58,7 +61,7 @@ Planner rows never feed History, Insights, or Recents.
 
 Top-to-bottom order:
 
-1. Navigation title: `L10n.plannerTitle` (`Today`), `.inline` display
+1. Navigation title: `L10n.plannerTitle` (`My Day`), `.inline` display
    mode. No timer-running subtitle anywhere — the running task's
    accent-colored `In progress` row label is the indicator.
 2. Checklist `List(.plain)` (`accessibilityIdentifier`: `PlannerTaskList`):
@@ -67,7 +70,10 @@ Top-to-bottom order:
 3. Bottom-fixed composer card: the UIKit-backed inline field
    (`PlannerComposerField`, `L10n.plannerComposerPlaceholder`) wrapped in
    the shared `FieldCard` chrome (secondary background against the
-   primary page, `minTapArea` minimum height). No visible Add button:
+   primary page, `minTapArea` minimum height, contrasting hairline
+   border in both appearances). A persistent leading plus (decorative,
+   hidden from assistive tech) names the purpose with and without typed
+   text. No visible Add button:
    Return submits, and the composer's Add accessibility action
    (`L10n.plannerAdd`) keeps the VoiceOver submit path. A trailing clear
    button (the Track × grammar — small dim trailing × while editing,
@@ -87,8 +93,10 @@ Top-to-bottom order:
    `PlannerChipsNoMatch`, instead of an empty strip). Each chip shows its
    Recent's first category icon plus the exact text. Tapping one fills
    the composer and stages the Recent's full ordered set for the created
-   task — no task is created, no timer starts; the line then shows only
-   the selected chip until typing resumes, the set surviving until the
+   task — no task is created, no timer starts; chip taps play the
+   selection haptic, and the line then shows only the selected chip in
+   the filled-accent selected presentation (Track Recents parity) until
+   typing resumes, the set surviving until the
    draft clears or another chip is tapped. A
    `spacingSmall` breathing gap sits between the line and the keyboard;
    the slot holds one chip-row height while mounted (hidden prototype
@@ -123,7 +131,8 @@ actions, announced through the name control's combined label.
   `NamePicker`, the same Categories card with the shared `TagSelector`,
   the same Notes presenter pushing the shared `NotesEditorPage` with
   copy-on-open X/✓ semantics; same order, same validation, same save
-  gate). The sheet saves the name, the set, and the notes as independent
+  gate). Completed taps are a no-op — a completed task is edited only
+  after reopening. The sheet saves the name, the set, and the notes as independent
   field intents, so a name-only edit sends no categories and a notes-only
   edit sends no name; the 2000-trimmed-rune notes bound gates Save like
   the Log Time form.
@@ -148,7 +157,9 @@ actions, announced through the name control's combined label.
   footprint, no Start button.
 - Swipes (Mail-style icon+text pills): trailing-side Delete
   (`L10n.entryDeleteConfirm`, `trash`, danger tint, full-swipe deletes)
-  into the durable undo buffer (no outbox row yet); leading-side
+  into the durable undo buffer (no outbox row yet) — never for the
+  running task (no trailing swipe button, Edit-mode delete disabled via
+  `deleteDisabled`, handler skips the linked id); leading-side
   complete/reopen (`L10n.plannerMarkDone` / `L10n.plannerReopen`,
   `checkmark` / `arrow.uturn.backward`, accent tint) with the toggle
   semantics — position kept, timers and entries untouched. Edit-mode
@@ -227,3 +238,15 @@ construction). `accessibilityIdentifier`: `PlannerProgressControl`.
   delete/undo, Start guards, inheritance) plus focus-request generations
   (successful submits bump, invalid ones don't) and `PlannerRowLayoutTests`
   (Start slot mounted-but-hidden when done; suggestion highlight split).
+- [x] The isolated staged chip renders in the filled-accent selected
+  presentation (Track Recents parity: accent fill, on-accent content,
+  `.isSelected` trait), pinned via `isSelectedChip`.
+- [x] Completed taps never open the editor (`beginEdit` no-op); the
+  running linked task offers no delete affordance (no trailing swipe
+  button, Edit-mode `deleteDisabled`, handler skips the linked id).
+- [x] Valid submits play the success haptic and chip taps the selection
+  haptic through the injected `playHaptic` seam (test double; generators
+  never fire headless).
+- [x] The page title is `My Day` (all five locales + `L10n`); the composer
+  carries a persistent leading plus with the contrasting `FieldCard`
+  hairline border in both appearances.

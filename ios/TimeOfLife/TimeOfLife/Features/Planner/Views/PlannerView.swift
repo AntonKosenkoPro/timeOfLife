@@ -125,20 +125,27 @@ struct PlannerView: View {
     /// store/reload round-trip is. There is no visible Add button
     /// (day-planner 11.1): submission runs through Return or the
     /// composer's Add accessibility action, so VoiceOver retains a
-    /// submit path. A trailing clear button (the Track × grammar — small
-    /// dim trailing × while editing) empties the draft without
-    /// dismissing the keyboard or losing focus; its visibility follows
-    /// the UIKit editing state mirrored from the field delegate (ground
-    /// truth), not the `composerFocused` flag (which only issues focus
-    /// requests). The composer never
+    /// submit path. A persistent leading plus (day-planner 17.5 — the
+    /// placeholder disappears while typing, so the affordance names the
+    /// purpose with and without text; decorative, hidden from assistive
+    /// tech) opens the row, and a trailing clear button (the Track ×
+    /// grammar — small dim trailing × while editing) empties the draft
+    /// without dismissing the keyboard or losing focus; its visibility
+    /// follows the UIKit editing state mirrored from the field delegate
+    /// (ground truth), not the `composerFocused` flag (which only issues
+    /// focus requests). The composer never
     /// unmounts and no layout jumps. The field sits in the shared
     /// `FieldCard` chrome (secondary background against the primary
-    /// page, `minTapArea` minimum height), so it reads as a card apart
+    /// page, `minTapArea` minimum height, contrasting hairline border in
+    /// both appearances), so it reads as a card apart
     /// from the list; the representable keeps its stable identity
     /// inside the card, so first-responder survival is unchanged.
     private var composer: some View {
         FieldCard {
             HStack(spacing: Theme.spacingSmall) {
+                Image(systemName: "plus")
+                    .foregroundStyle(Theme.textSecondary)
+                    .accessibilityHidden(true)
                 PlannerComposerField(
                     text: $vm.draft,
                     placeholder: L10n.plannerComposerPlaceholder.text,
@@ -184,9 +191,11 @@ struct PlannerView: View {
             // a fresh row expands in at the top (see `PlannerRowInsertion`;
             // opacity-only under Reduce Motion). Row taps open the task
             // editor sheet (day-planner 14.1) — the row never renames
-            // inline. Row swipes carry labeled pills with icon + text
-            // (day-planner 11.2): trailing-side delete into the durable
-            // undo buffer, leading-side complete/reopen with the toggle
+            // inline, and completed taps are a no-op (day-planner 17.2,
+            // gated in `beginEdit`). Row swipes carry labeled pills with
+            // icon + text (day-planner 11.2): trailing-side delete into
+            // the durable undo buffer (never for the running linked
+            // task), leading-side complete/reopen with the toggle
             // semantics — no behavior change.
             ForEach(Array(vm.snapshot.tasks.enumerated()), id: \.element.id) { index, task in
                 PlannerTaskRow(
@@ -200,13 +209,21 @@ struct PlannerView: View {
                         if await vm.startTask(task) { onStartActive() }
                     }
                 )
+                // The running linked task offers no delete affordance
+                // (day-planner 17.2): no trailing swipe button here, and
+                // Edit-mode delete is disabled below — the framework's row
+                // delete-disabling. The `delete(at:)` handler skips the
+                // linked id too, so a delete-all gesture leaves it behind.
+                .deleteDisabled(vm.linkedTaskID == task.id)
                 .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) {
-                        Task { await vm.delete(at: IndexSet(integer: index)) }
-                    } label: {
-                        Label(L10n.entryDeleteConfirm.text, systemImage: "trash")
+                    if vm.linkedTaskID != task.id {
+                        Button(role: .destructive) {
+                            Task { await vm.delete(at: IndexSet(integer: index)) }
+                        } label: {
+                            Label(L10n.entryDeleteConfirm.text, systemImage: "trash")
+                        }
+                        .tint(Theme.danger)
                     }
-                    .tint(Theme.danger)
                 }
                 .swipeActions(edge: .leading) {
                     Button {
@@ -308,9 +325,14 @@ struct PlannerView: View {
     /// One chip: the Recent's first category icon plus its exact text
     /// (day-planner 16.2; text-only when the Recent carries no resolvable
     /// first category). Tapping fills the composer with the exact text and
-    /// stages the Recent's full set for the created task.
+    /// stages the Recent's full set for the created task, playing the
+    /// selection haptic (day-planner 17.3). The isolated staged chip
+    /// renders in the filled-accent selected presentation (day-planner
+    /// 17.1, Track Recents parity: accent fill, on-accent content, the
+    /// `.isSelected` trait) instead of the plain capsule.
     private func chip(_ recent: RecentEntry) -> some View {
-        Button {
+        let selected = vm.isSelectedChip(recent)
+        return Button {
             vm.fillFromChip(recent)
             composerFocused = true
         } label: {
@@ -318,24 +340,29 @@ struct PlannerView: View {
                 if let symbol = vm.chipIconSymbol(for: recent) {
                     Image(systemName: symbol)
                         .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(selected ? Theme.textOnAccent : Theme.textSecondary)
                         .accessibilityHidden(true)
                 }
                 Text(recent.activityText)
                     .font(.subheadline)
                     .lineLimit(1)
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(selected ? Theme.textOnAccent : Theme.textPrimary)
             }
             .padding(.horizontal, Theme.spacingMedium)
             .padding(.vertical, 12)
             .frame(minHeight: Theme.minTapArea)
-            .background(Theme.backgroundSecondary)
+            .background(selected ? Theme.accentPrimary : Theme.backgroundSecondary)
             .clipShape(Capsule())
             .overlay {
-                Capsule().stroke(Theme.hairline, lineWidth: 0.7)
+                Capsule().stroke(
+                    selected ? Theme.accentPrimary : Theme.hairline,
+                    lineWidth: 0.7
+                )
             }
         }
         .buttonStyle(.plain)
+        .accessibilityValue(selected ? L10n.undoSelected.text : "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("PlannerChip-\(recent.activityText)")
     }
 

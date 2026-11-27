@@ -17,6 +17,14 @@ struct StagedChip: Equatable, Sendable {
     var categoryIDs: [String]
 }
 
+/// The two planner haptic moments (day-planner 17.3, HIG playing-haptics):
+/// success when a valid submit completes (an action completed), selection
+/// when a chip tap changes the staged selection.
+enum PlannerHaptic: Equatable, Sendable {
+    case success
+    case selection
+}
+
     /// The Today projection view model (day-planner spec): an inline composer over
 /// a reorderable checklist projected from one ordered backlog, with a task
 /// editor sheet for renaming and tagging. Today is the
@@ -84,6 +92,11 @@ final class PlannerViewModel: ObservableObject {
     private let store: LocalStore
     private let undoBuffer: UndoBufferStore
     private let timer: TimerService
+    /// Haptic sink (day-planner 17.3): success on valid submit, selection
+    /// on chip tap. Production maps to the shared `Haptics` wrapper;
+    /// tests inject a recorder (generators never fire headless, so the
+    /// wiring is verified through this seam).
+    private let playHaptic: (PlannerHaptic) -> Void
     /// Notification surface for the linked-stop commit reload (day-planner
     /// 14.2). Production uses `.default`; tests inject a private center so
     /// global posts from parallel suites cannot reload this VM out from
@@ -104,11 +117,17 @@ final class PlannerViewModel: ObservableObject {
     /// publishes without animation.
     private var pendingInsertionID: String?
 
-    init(store: LocalStore, undoBuffer: UndoBufferStore, timer: TimerService, notifications: NotificationCenter = .default) {
+    init(store: LocalStore, undoBuffer: UndoBufferStore, timer: TimerService, notifications: NotificationCenter = .default, playHaptic: ((PlannerHaptic) -> Void)? = nil) {
         self.store = store
         self.undoBuffer = undoBuffer
         self.timer = timer
         self.notifications = notifications
+        self.playHaptic = playHaptic ?? { event in
+            switch event {
+            case .success: Haptics.success()
+            case .selection: Haptics.selection()
+            }
+        }
         observeLinkedStop()
         observeTaskConvergence()
     }
@@ -282,10 +301,7 @@ final class PlannerViewModel: ObservableObject {
     /// still reads its exact text (day-planner 16.2); typing anything else
     /// filters again — the staged set survives, only the display narrows.
     var chips: [RecentEntry] {
-        if let staged = stagedChip, draft == staged.text,
-           let selected = recents.first(where: { $0.id == staged.text }) {
-            return [selected]
-        }
+        if let selected = selectedRecent { return [selected] }
         let trimmed = ActivityName.normalized(draft)
         guard !trimmed.isEmpty else { return Array(recents.prefix(Self.chipDisplayCap)) }
         let lowered = trimmed.lowercased()
@@ -294,14 +310,35 @@ final class PlannerViewModel: ObservableObject {
             .prefix(Self.chipDisplayCap))
     }
 
+    /// The single selected chip (day-planner 17.1): the tapped Recent while
+    /// the draft still reads its exact text — the line's selected-only
+    /// display, rendered in the filled-accent selected presentation
+    /// (Track Recents parity). Nil while merely filtering, after typing
+    /// resumes, or when the draft clears.
+    private var selectedRecent: RecentEntry? {
+        guard let staged = stagedChip, draft == staged.text else { return nil }
+        return recents.first { $0.id == staged.text }
+    }
+
+    /// Whether a chip renders in the selected presentation (day-planner
+    /// 17.1): true only for the isolated staged chip above — the helper
+    /// `PlannerView` consumes, pinned here because SwiftUI rendering is
+    /// not unit-testable (the `PlannerStartSlot` precedent).
+    func isSelectedChip(_ recent: RecentEntry) -> Bool {
+        selectedRecent?.id == recent.id
+    }
+
     /// Fills the composer with a chip's exact text for editing or
     /// submission and stages the Recent's full ordered category set for the
     /// created task (day-planner 16.2). Creates no task, starts no timer.
     /// Replaces any previously staged set; the set survives typing and
     /// clears only when the draft clears or another chip is tapped.
+    /// Tapping plays the selection haptic (day-planner 17.3 — a selection
+    /// changed).
     func fillFromChip(_ recent: RecentEntry) {
         draft = recent.activityText
         stagedChip = StagedChip(text: recent.activityText, categoryIDs: recent.categoryIDs)
+        playHaptic(.selection)
     }
 
     /// Validated SF Symbol for a chip's leading icon (day-planner 16.2):
@@ -353,6 +390,10 @@ final class PlannerViewModel: ObservableObject {
                 errorMessage = L10n.text(in: .default, code: "error.unknown")
                 return
             }
+            // A valid submit completed (day-planner 17.3): the success
+            // haptic fires only on the saved path — invalid drafts return
+            // above, failures report an error with the draft intact.
+            playHaptic(.success)
             draft = ""
             pendingInsertionID = id
             invalidate()
@@ -392,9 +433,12 @@ final class PlannerViewModel: ObservableObject {
 
     /// Opens the editor sheet for a task, prefilling the name, ordered
     /// category, and notes drafts from the snapshot copy. Tapping a row is
-    /// the only entry point — there is no inline renaming. Starts a fresh
+    /// the only entry point — there is no inline renaming. Completed tasks
+    /// never open the editor (day-planner 17.2): a completed tap is a
+    /// no-op, editing resumes only after reopening. Starts a fresh
     /// error scope: a banner from an earlier surface must not greet the editor.
     func beginEdit(_ task: PlannerTask) {
+        guard task.completedOn == nil else { return }
         errorMessage = nil
         editingTask = task
         sheetName = task.name
@@ -582,11 +626,14 @@ final class PlannerViewModel: ObservableObject {
     /// Deletes the visible tasks (swipe-to-delete) into the durable undo
     /// buffer: the rows vanish with no outbox row yet, restorable until
     /// restart or a successful push through the DEFAULT system Undo
-    /// confirmation (entry/category precedent). Reloads even when every
+    /// confirmation (entry/category precedent). The running linked task is
+    /// never deletable (day-planner 17.2): its offsets are skipped, so a
+    /// delete-all gesture leaves exactly it behind. Reloads even when every
     /// deletion reports missing (a sync may have removed the row first).
     func delete(at offsets: IndexSet) async {
         for index in offsets {
             guard snapshot.tasks.indices.contains(index) else { continue }
+            guard snapshot.tasks[index].id != linkedTaskID else { continue }
             do {
                 _ = try await store.deletePlannerTaskUndoable(id: snapshot.tasks[index].id)
             } catch {
