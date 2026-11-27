@@ -32,6 +32,16 @@ struct PlannerTaskRow: View {
     let onToggle: () -> Void
     let onEdit: () -> Void
     let onStart: () async -> Void
+    /// The inline blocked-Start error (day-planner 19.1): non-nil only for
+    /// the row whose dimmed Start was tapped while a run is active. Renders
+    /// as a short red multi-line label under the name (wrapping, never
+    /// truncated — the copy stays tight for the largest Dynamic Type).
+    let blockedError: String?
+    /// Blocked-Start shake attempts (day-planner 19.1): the view bumps this
+    /// on every rejected tap and the error label shakes off it
+    /// (NotesEditorPage overcount grammar — suppressed under Reduce
+    /// Motion, the haptic still fires).
+    let shakeAttempts: Int
     /// Under Reduce Motion the top-row insertion is opacity-only instead
     /// of expanding (day-planner 8.1).
     @Environment(\.accessibilityReduceMotion)
@@ -128,6 +138,28 @@ struct PlannerTaskRow: View {
                                     .accessibilityHidden(true)
                             }
                         }
+                        // Blocked-Start error (day-planner 19.1): the short
+                        // red message for a Start tapped while a run is
+                        // active — wrapping lines, never a one-line
+                        // truncation, shaking on every rejected tap.
+                        if let blockedError {
+                            Text(blockedError)
+                                .font(.footnote)
+                                .foregroundStyle(Theme.danger)
+                                .multilineTextAlignment(.leading)
+                                .keyframeAnimator(initialValue: CGFloat.zero, trigger: shakeAttempts) { content, value in
+                                    content.offset(x: value)
+                                } keyframes: { _ in
+                                    KeyframeTrack {
+                                        CubicKeyframe(12, duration: 0.06)
+                                        CubicKeyframe(-9, duration: 0.06)
+                                        CubicKeyframe(6, duration: 0.06)
+                                        CubicKeyframe(-3, duration: 0.06)
+                                        CubicKeyframe(0, duration: 0.06)
+                                    }
+                                }
+                                .accessibilityIdentifier("PlannerBlockedStartError")
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -150,9 +182,9 @@ struct PlannerTaskRow: View {
             // shorter — so open, completed, and running rows share one
             // height and no sibling moves). A visible Start under an active
             // run renders dimmed (the PrimaryButton disabled-fill grammar)
-            // but stays tappable: the tap rejects with the nav-bar shake +
-            // reject haptic instead of starting (day-planner 18.4) — a
-            // truly disabled control would swallow the tap. See
+            // but stays tappable: the tap shows the row's inline red error
+            // and plays the reject haptic instead of starting (day-planner
+            // 19.1) — a truly disabled control would swallow the tap. See
             // `PlannerStartSlot`.
             ZStack {
                 Button(L10n.timerStart.text) {

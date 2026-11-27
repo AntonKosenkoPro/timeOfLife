@@ -1,18 +1,22 @@
 import SwiftUI
 
 /// The task editor sheet (day-planner 14.1/15.1/16.3): edits one planner
-/// task's name, ordered category set, and notes — the manual entry form
-/// with the Start and End cards omitted (same shared Name entry card into
-/// `NamePicker`, same Categories card, same Notes presenter, same order,
-/// same validation, same save gate). Categories and notes are optional
-/// (zero tags and empty notes allowed, tag order preserved); identical
-/// names stay separate identities. Tapping a planner row is the only entry
-/// point. Editing the running task shows the `In progress` subheader; the
-/// bottom delete is disabled for the running task (a disabled-tap shakes
-/// the subheader and plays the reject haptic instead of deleting) and
-/// deletes into the durable undo buffer otherwise (day-planner 18.1). A
-/// save failure surfaces as a non-field error with the draft intact and
-/// the sheet open.
+/// task's ordered category set and notes, plus its name — the manual entry
+/// form with the Start and End cards omitted (same shared Name entry card
+/// into `NamePicker`, same Categories card, same Notes presenter, same
+/// order, same validation, same save gate), except the Name field is
+/// read-only while the task carries the active linked run (day-planner
+/// 19.4: a locked label, Categories and Notes stay editable and live).
+/// Categories and notes are optional (zero tags and empty notes allowed,
+/// tag order preserved); identical names stay separate identities. Tapping
+/// a planner row is the only entry point. Editing the running task shows
+/// the `In progress` subheader; the bottom delete is the shared red
+/// destructive `Delete` control (entry-form parity, day-planner 19.3) —
+/// disabled for the running task, where the tap shows an explicit red
+/// error under it, shakes it, and plays the reject haptic instead of
+/// deleting (day-planner 19.2), and deletes into the durable undo buffer
+/// otherwise (day-planner 18.1). A save failure surfaces as a non-field
+/// error with the draft intact and the sheet open.
 struct PlannerTaskEditorSheet: View {
     @ObservedObject var vm: PlannerViewModel
     @EnvironmentObject var container: AppContainer
@@ -22,10 +26,11 @@ struct PlannerTaskEditorSheet: View {
     /// sheet's internal stack, so no sheet ever stacks over this sheet
     /// (Log Time CREATE-sheet precedent).
     @State private var isShowingCategoryEditor = false
-    /// Disabled-delete shake attempts (day-planner 18.1): tapping the
-    /// running task's disabled delete shakes the `In progress` subheader
-    /// (NotesEditorPage overcount grammar — suppressed under Reduce Motion,
-    /// the reject haptic still fires).
+    /// Disabled-delete shake attempts (day-planner 19.2): tapping the
+    /// running task's disabled delete shows the explicit red error under
+    /// the Delete control and shakes that cluster (NotesEditorPage
+    /// overcount grammar — suppressed under Reduce Motion, the reject
+    /// haptic still fires).
     @State private var shakeAttempts = 0
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
@@ -56,26 +61,14 @@ struct PlannerTaskEditorSheet: View {
                             .lineLimit(1)
                         // The running task's subheader (day-planner 18.1):
                         // the `In progress` row-label grammar, reused so no
-                        // new string is needed.
+                        // new string is needed. Static — the disabled
+                        // delete shakes its own explicit error instead
+                        // (day-planner 19.2).
                         if vm.isEditingRunningTask {
                             Text(L10n.plannerInProgress.text)
                                 .font(.footnote)
                                 .foregroundStyle(Theme.accentPrimary)
                                 .lineLimit(1)
-                        }
-                    }
-                    // Disabled-delete feedback shakes THIS stack (the
-                    // NotesEditorPage counter-stack precedent: a horizontal
-                    // keyframe track keyed on the failed attempt counter).
-                    .keyframeAnimator(initialValue: CGFloat.zero, trigger: shakeAttempts) { content, value in
-                        content.offset(x: value)
-                    } keyframes: { _ in
-                        KeyframeTrack {
-                            CubicKeyframe(12, duration: 0.06)
-                            CubicKeyframe(-9, duration: 0.06)
-                            CubicKeyframe(6, duration: 0.06)
-                            CubicKeyframe(-3, duration: 0.06)
-                            CubicKeyframe(0, duration: 0.06)
                         }
                     }
                     .accessibilityElement(children: .combine)
@@ -117,27 +110,57 @@ struct PlannerTaskEditorSheet: View {
         }
     }
 
-    /// The Name card (day-planner 16.3): the shared `EntryNameCard` — the
-    /// same push row into `NamePicker` the Log Time form uses (same
-    /// behavior, same chrome, one component never a copy). The picker's
+    /// The Name card (day-planner 16.3, locked 19.4): the shared
+    /// `EntryNameCard` — the same push row into `NamePicker` the Log Time
+    /// form uses (same behavior, same chrome, one component never a copy),
+    /// except the running task renders a locked label in the same card
+    /// chrome (read-only: no chevron, no push) while Categories and Notes
+    /// stay editable. The picker's
     /// completion writes the sheet drafts (`applySheetSuggestion` fills the
     /// exact text plus the entry's ordered categories;
     /// `completeSheetTypedName` resolves typed text the same way); Back
     /// discards the picker typing (copy-on-open, manual-form cancel
     /// semantics).
-    private var nameCard: some View {
-        EntryNameCard(
-            value: vm.sheetName,
-            placeholder: L10n.entryNamePlaceholder.text,
-            recents: vm.sheetNameRecents,
-            categories: Dictionary(uniqueKeysWithValues: vm.availableCategories.map { ($0.id, $0) }),
-            emptyHint: L10n.timerRecentsEmptyHint.text,
-            accessibilityID: "PlannerEditorNameRow",
-            onCompleteSuggestion: {
-                vm.applySheetSuggestion(text: $0.text, categoryIDs: $0.categoryIDs)
-            },
-            onCompleteText: { vm.completeSheetTypedName($0) }
-        )
+    @ViewBuilder private var nameCard: some View {
+        // The running task's name is read-only (day-planner 19.4): a
+        // locked label in the Name card chrome (Track locked-label
+        // precedent — caption over the value, no chevron, no push) instead
+        // of the shared entry card. Categories and Notes below stay
+        // editable and live. Any other task keeps the shared `EntryNameCard`
+        if vm.isEditingRunningTask {
+            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                Text(L10n.entryNameLabel.text)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                Text(vm.sheetName)
+                    .font(.body)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(minHeight: Theme.minTapArea)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Theme.spacingMedium)
+            .background(Theme.backgroundSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+            .accessibilityLabel(L10n.entryNameLabel.text)
+            .accessibilityValue(vm.sheetName)
+            .accessibilityIdentifier("PlannerEditorNameRow")
+        } else {
+            EntryNameCard(
+                value: vm.sheetName,
+                placeholder: L10n.entryNamePlaceholder.text,
+                recents: vm.sheetNameRecents,
+                categories: Dictionary(uniqueKeysWithValues: vm.availableCategories.map { ($0.id, $0) }),
+                emptyHint: L10n.timerRecentsEmptyHint.text,
+                accessibilityID: "PlannerEditorNameRow",
+                onCompleteSuggestion: {
+                    vm.applySheetSuggestion(text: $0.text, categoryIDs: $0.categoryIDs)
+                },
+                onCompleteText: { vm.completeSheetTypedName($0) }
+            )
+        }
     }
 
     /// The Categories card (Log Time categories-card grammar): the shared
@@ -219,29 +242,54 @@ struct PlannerTaskEditorSheet: View {
         }
     }
 
-    /// Bottom delete (day-planner 18.1): the normal path deletes into the
-    /// durable undo buffer and pops the sheet (restorable through the
-    /// system Undo confirmation). For the running task delete is disabled:
-    /// the button renders dimmed (the PrimaryButton disabled-fill grammar)
-    /// but stays tappable — a truly disabled control would swallow the
-    /// tap — and the tap shakes the `In progress` subheader and plays the
-    /// reject haptic instead of deleting (NotesEditorPage overcount
-    /// grammar). The swipe-delete label is reused — no new string.
+    /// Bottom delete (day-planner 19.3): the shared red destructive `Delete`
+    /// control, identical to the entry editing form (HIG destructive style
+    /// + plain `Delete` wording — the entry form's `Delete entry` diverged
+    /// in wording, the sheet's bordered trash button diverged in style;
+    /// both now share this control and string). For the running task delete
+    /// is disabled: the button renders dimmed (the PrimaryButton
+    /// disabled-fill grammar) but stays tappable — a truly disabled control
+    /// would swallow the tap — and the tap shows the explicit red error
+    /// below, shakes this cluster, and plays the reject haptic instead of
+    /// deleting (day-planner 19.2, NotesEditorPage overcount grammar). The
+    /// normal path deletes into the durable undo buffer and pops the sheet.
     private var deleteSection: some View {
-        Button(role: .destructive) {
-            Task {
-                if await vm.attemptDeleteEditingTask() {
-                    dismiss()
-                } else if !reduceMotion {
-                    shakeAttempts += 1
+        VStack(spacing: Theme.spacingExtraSmall) {
+            DestructiveBottomButton(
+                title: L10n.entryDeleteConfirm.text,
+                accessibilityId: "PlannerEditorDeleteButton"
+            ) {
+                Task {
+                    if await vm.attemptDeleteEditingTask() {
+                        dismiss()
+                    } else if !reduceMotion {
+                        shakeAttempts += 1
+                    }
                 }
             }
-        } label: {
-            Label(L10n.entryDeleteConfirm.text, systemImage: "trash")
-                .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+            .opacity(vm.isEditingRunningTask ? Theme.opacityDisabledFill : 1)
+            if let deleteBlockedMessage = vm.deleteBlockedMessage {
+                Text(deleteBlockedMessage)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.danger)
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier("PlannerEditorDeleteError")
+            }
         }
-        .buttonStyle(.bordered)
-        .opacity(vm.isEditingRunningTask ? Theme.opacityDisabledFill : 1)
-        .accessibilityIdentifier("PlannerEditorDeleteButton")
+        // Disabled-delete feedback shakes THIS cluster (the NotesEditorPage
+        // counter-stack precedent: a horizontal keyframe track keyed on the
+        // failed attempt counter). Always mounted, so the trigger fires even
+        // as the error text appears.
+        .keyframeAnimator(initialValue: CGFloat.zero, trigger: shakeAttempts) { content, value in
+            content.offset(x: value)
+        } keyframes: { _ in
+            KeyframeTrack {
+                CubicKeyframe(12, duration: 0.06)
+                CubicKeyframe(-9, duration: 0.06)
+                CubicKeyframe(6, duration: 0.06)
+                CubicKeyframe(-3, duration: 0.06)
+                CubicKeyframe(0, duration: 0.06)
+            }
+        }
     }
 }

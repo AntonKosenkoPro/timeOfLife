@@ -205,7 +205,6 @@
 "entry.dismissLabel" = "关闭";
 "entry.confirmAddLabel" = "添加条目";
 "entry.confirmSaveLabel" = "存储条目";
-"entry.delete" = "删除条目";
 "entry.deleteTitle" = "确定要删除此条目吗？";
 "entry.deleteMessage" = "该条目将被删除，可摇动设备撤销。";
 "entry.deleteConfirm" = "删除";
@@ -362,4 +361,5 @@
 "planner.noMatch" = "无匹配项";
 "planner.reorder" = "重新排序";
 "planner.dismissKeyboard" = "收起键盘";
-"planner.outsideRun" = "%1$@ 正在进行中";
+"planner.blockedStart" = "已有任务在进行，无法开始";
+"planner.deleteRunning" = "无法删除正在进行的任务";

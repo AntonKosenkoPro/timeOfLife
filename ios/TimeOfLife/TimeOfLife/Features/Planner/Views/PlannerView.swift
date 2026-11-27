@@ -31,11 +31,11 @@ struct PlannerView: View {
     /// active the list's `onMove` handles show drag handles (and the rotor
     /// reorder path stays live); delete affordances never appear.
     @State private var isReordering = false
-    /// Nav-bar subheader shake attempts (day-planner 18.4): a disabled
-    /// Start tap shakes the principal stack and plays the reject haptic
-    /// instead of starting (NotesEditorPage overcount grammar — suppressed
-    /// under Reduce Motion, the haptic still fires).
-    @State private var subtitleShakeAttempts = 0
+    /// Blocked-Start error shake attempts (day-planner 19.1): a disabled
+    /// Start tap shows the row's inline red error and plays the reject
+    /// haptic instead of starting (NotesEditorPage overcount grammar —
+    /// suppressed under Reduce Motion, the haptic still fires).
+    @State private var blockedStartShakeAttempts = 0
     /// Composer dismiss requests (day-planner 18.3): the dismiss control
     /// bumps this; the field resigns once per new value.
     @State private var composerDismissID = 0
@@ -51,35 +51,14 @@ struct PlannerView: View {
         content
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // The running indicator depends on the run (day-planner
-                // 18.4): a planner-linked run reads the accent `In
-                // progress` label on its row (no nav-bar subtitle); a
-                // NON-planner run names itself in the nav-bar subheader
-                // (`<name> is in progress now`) so a disabled Start tap has
-                // a subheader to shake.
+                // The running indicator lives on the row (day-planner
+                // spec): a planner-linked run reads the accent `In
+                // progress` label on its row; a blocked Start under any
+                // active run shows the row's inline red error instead
+                // (day-planner 19.1) — the nav bar carries the title only.
                 ToolbarItem(placement: .principal) {
-                    VStack(spacing: 0) {
-                        Text(L10n.plannerTitle.text)
-                            .font(.headline)
-                        if let subtitle = vm.outsideRunSubtitle {
-                            Text(subtitle)
-                                .font(.footnote)
-                                .foregroundStyle(Theme.textSecondary)
-                                .lineLimit(1)
-                                .accessibilityIdentifier("PlannerOutsideRunSubtitle")
-                        }
-                    }
-                    .keyframeAnimator(initialValue: CGFloat.zero, trigger: subtitleShakeAttempts) { content, value in
-                        content.offset(x: value)
-                    } keyframes: { _ in
-                        KeyframeTrack {
-                            CubicKeyframe(12, duration: 0.06)
-                            CubicKeyframe(-9, duration: 0.06)
-                            CubicKeyframe(6, duration: 0.06)
-                            CubicKeyframe(-3, duration: 0.06)
-                            CubicKeyframe(0, duration: 0.06)
-                        }
-                    }
+                    Text(L10n.plannerTitle.text)
+                        .font(.headline)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -168,8 +147,9 @@ struct PlannerView: View {
     /// The persistent inline field (see `PlannerComposerRow`): Return
     /// prepends one task at the top, clears the draft, and focus never
     /// leaves; no visible Add button; a leading plus, a trailing clear
-    /// button, and — while editing — a keyboard-dismiss control (Return on
-    /// an empty draft dismisses too, the only submit-path resign allowed).
+    /// button, and — while editing — a detached circular keyboard-dismiss
+    /// control beside the card (Return on an empty draft dismisses too,
+    /// the only submit-path resign allowed).
     private var composer: some View {
         PlannerComposerRow(
             vm: vm,
@@ -207,9 +187,9 @@ struct PlannerView: View {
             // no edit-mode deletion UI (day-planner 18.2): reordering runs
             // through the dedicated reorder control, which only surfaces
             // the list's `onMove` handles — no delete affordances appear in
-            // reorder mode. A disabled Start tap (a run is active) shakes
-            // the nav-bar subheader and plays the reject haptic instead of
-            // starting (day-planner 18.4).
+            // reorder mode. A disabled Start tap (a run is active) shows
+            // the row's inline red error and plays the reject haptic
+            // instead of starting (day-planner 19.1).
             ForEach(Array(vm.snapshot.tasks.enumerated()), id: \.element.id) { index, task in
                 PlannerTaskRow(
                     task: task,
@@ -220,14 +200,16 @@ struct PlannerView: View {
                     onEdit: { vm.beginEdit(task) },
                     onStart: {
                         if vm.startShouldReject(task) {
-                            vm.rejectDisabledStart()
+                            vm.rejectDisabledStart(for: task)
                             if !reduceMotion {
-                                subtitleShakeAttempts += 1
+                                blockedStartShakeAttempts += 1
                             }
                         } else if await vm.startTask(task) {
                             onStartActive()
                         }
-                    }
+                    },
+                    blockedError: vm.blockedStartTaskID == task.id ? L10n.plannerBlockedStart.text : nil,
+                    shakeAttempts: blockedStartShakeAttempts
                 )
                 .swipeActions(edge: .trailing) {
                     if vm.linkedTaskID != task.id {

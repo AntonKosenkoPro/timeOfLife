@@ -161,7 +161,6 @@ enum L10n: String, CaseIterable {
     case entryDismissLabel = "entry.dismissLabel"
     case entryConfirmAddLabel = "entry.confirmAddLabel"
     case entryConfirmSaveLabel = "entry.confirmSaveLabel"
-    case entryDelete = "entry.delete"
     case entryDeleteTitle = "entry.deleteTitle"
     case entryDeleteMessage = "entry.deleteMessage"
     case entryDeleteConfirm = "entry.deleteConfirm"
@@ -216,10 +215,11 @@ enum L10n: String, CaseIterable {
     case plannerMarkDone = "planner.markDone"
     case plannerReopen = "planner.reopen"
     case plannerNoMatch = "planner.noMatch"
+    case plannerBlockedStart = "planner.blockedStart"
+    case plannerDeleteRunning = "planner.deleteRunning"
     case plannerInProgress = "planner.inProgress"
     case plannerReorder = "planner.reorder"
     case plannerDismissKeyboard = "planner.dismissKeyboard"
-    case plannerOutsideRun = "planner.outsideRun"
 
     // Undo (chip selection accessibility; the category UndoToast is gone —
     // deletions undo through the system Undo confirmation instead)

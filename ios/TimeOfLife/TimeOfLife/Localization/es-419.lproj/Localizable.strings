@@ -205,7 +205,6 @@
 "entry.dismissLabel" = "Cerrar";
 "entry.confirmAddLabel" = "Añadir entrada";
 "entry.confirmSaveLabel" = "Guardar entrada";
-"entry.delete" = "Eliminar entrada";
 "entry.deleteTitle" = "¿Eliminar esta entrada?";
 "entry.deleteMessage" = "Esta entrada será eliminada. Agitar para deshacer.";
 "entry.deleteConfirm" = "Eliminar";
@@ -362,4 +361,5 @@
 "planner.noMatch" = "Sin coincidencias";
 "planner.reorder" = "Reordenar";
 "planner.dismissKeyboard" = "Ocultar el teclado";
-"planner.outsideRun" = "%1$@ está en curso ahora";
+"planner.blockedStart" = "No puedes iniciar una tarea mientras otra está en curso";
+"planner.deleteRunning" = "No puedes eliminar la tarea en curso";

@@ -69,11 +69,10 @@ Planner rows never feed History, Insights, or Recents.
 Top-to-bottom order:
 
 1. Navigation title: `L10n.plannerTitle` (`My Day`), `.inline` display
-   mode, with a conditional nav-bar subheader: while a NON-planner timer
-   runs, the bar reads `<name> is in progress now`
-   (`L10n.plannerOutsideRun`) naming the running entry. A planner-linked
-   run shows no subtitle — its indicator stays the accent-colored
-   `In progress` row label.
+   mode, with no subtitle — the running indicator lives on the row: a
+   planner-linked run reads the accent-colored `In progress` row label,
+   and a Start tapped while any run is active shows the row's inline red
+   error (`L10n.plannerBlockedStart`) instead of starting.
 2. Checklist `List(.plain)` (`accessibilityIdentifier`: `PlannerTaskList`):
    open and completed-Today rows in the shared order, no section header.
    Empty projection shows the empty hint (`L10n.plannerEmptyHint`) instead.
@@ -89,7 +88,8 @@ Top-to-bottom order:
    button (the Track × grammar — small dim trailing × while editing,
    `accessibilityIdentifier`: `PlannerComposerClear`) empties the draft
    without dismissing the keyboard or losing focus. While editing, a
-   trailing dismiss control (`keyboard.chevron.compact.down`,
+   detached circular × button beside the card (Mail search-clear grammar:
+   dark filled circle with an xmark, `xmark.circle.fill`,
    `L10n.plannerDismissKeyboard`, `PlannerComposerDismiss`) resigns
    without submitting; Return on an empty draft dismisses too — the
    only submit-path resign allowed.
@@ -145,16 +145,21 @@ actions, announced through the name control's combined label.
   `NamePicker`, the same Categories card with the shared `TagSelector`,
   the same Notes presenter pushing the shared `NotesEditorPage` with
   copy-on-open X/✓ semantics; same order, same validation, same save
-  gate). Completed taps are a no-op — a completed task is edited only
-  after reopening. Editing the running task shows the `In progress`
-  subheader under the title (`PlannerEditorSubheader`). The sheet saves
-  the name, the set, and the notes as independent field intents, so a
-  name-only edit sends no categories and a notes-only edit sends no name;
-  the 2000-trimmed-rune notes bound gates Save like the Log Time form. A
-  bottom delete (`trash`, `L10n.entryDeleteConfirm`,
-  `PlannerEditorDeleteButton`) removes the sheet's task into the durable
-  undo buffer and pops the sheet — except for the running task, whose
-  delete renders dimmed but stays tappable: the tap shakes the subheader
+  gate). The running task's Name is read-only — a locked label in the
+  same card chrome (no chevron, no push) — while its Categories and
+  Notes stay editable and converge live. Completed taps are a no-op — a
+  completed task is edited only after reopening. Editing the running
+  task shows the `In progress` subheader under the title
+  (`PlannerEditorSubheader`). The sheet saves the name, the set, and
+  the notes as independent field intents, so a name-only edit sends no
+  categories and a notes-only edit sends no name; the 2000-trimmed-rune
+  notes bound gates Save like the Log Time form. A bottom delete (the
+  shared red destructive `Delete` control, `L10n.entryDeleteConfirm`,
+  `PlannerEditorDeleteButton` — identical to the entry editing form)
+  removes the sheet's task into the durable undo buffer and pops the
+  sheet — except for the running task, whose delete renders dimmed but
+  stays tappable: the tap shows an explicit red error under it
+  (`L10n.plannerDeleteRunning`, `PlannerEditorDeleteError`), shakes it,
   and plays the reject haptic instead of deleting.
   (`PlannerName-<id>`; sheet: `PlannerEditorNameRow`,
   `PlannerEditorCategories`, `PlannerEditorNotesRow`,
@@ -175,9 +180,10 @@ actions, announced through the name control's combined label.
   shows the localized `In progress` label in the accent color
   (`L10n.plannerInProgress`, `PlannerInProgress-<id>`) instead — same
   footprint, no Start button. A visible Start under an active run renders
-  dimmed but stays tappable: the tap shakes the nav-bar subheader and plays
-  the reject haptic instead of starting (a truly disabled control would
-  swallow the tap).
+  dimmed but stays tappable: the tap shows a short red error in the row
+  (`L10n.plannerBlockedStart`, `PlannerBlockedStartError` — wrapping,
+  never truncated), shakes it, and plays the reject haptic instead of
+  starting (a truly disabled control would swallow the tap).
 - Swipes (Mail-style icon+text pills): trailing-side Delete
   (`L10n.entryDeleteConfirm`, `trash`, danger tint, full-swipe deletes)
   into the durable undo buffer (no outbox row yet) — never for the
@@ -250,10 +256,12 @@ construction). `accessibilityIdentifier`: `PlannerProgressControl`.
 - [x] Rows show ordered category chips under the name with the notes
   indicator trailing them (VoiceOver announces name, then categories,
   then notes) and read the accent-colored localized `In progress` label
-  over the preserved Start slot while the task carries the run; a
-  non-planner run names itself in the nav-bar subheader instead — no
-  other timer-running subtitle exists. Open, completed, and running rows
-  share one exact height (Reduce Motion respected).
+  over the preserved Start slot while the task carries the run; a Start
+  tapped while any run is active shows the row's inline red error
+  (`L10n.plannerBlockedStart`, shaking + reject haptic) instead of
+  starting — the nav bar carries no timer-running subtitle at all. Open,
+  completed, and running rows share one exact height (Reduce Motion
+  respected).
 - [x] A linked Stop invalidates the planner projection, so the Track
   counts refresh in place; ordinary Stop posts nothing and is unchanged.
 - [x] The progress icon follows completion (`checklist.unchecked` /
@@ -282,15 +290,19 @@ construction). `accessibilityIdentifier`: `PlannerProgressControl`.
   carries a persistent leading plus with the contrasting `FieldCard`
   hairline border in both appearances.
 - [x] The editor sheet shows the `In progress` subheader for the running
-  task and offers bottom delete — disabled for the running task with a
-  subheader-shake + reject haptic on tap, durable undo otherwise (pinned
-  via `isEditingRunningTask` / `attemptDeleteEditingTask`).
-- [x] The composer row offers an editing-only keyboard-dismiss control and
-  Return on an empty draft dismisses (the only submit-path resign
+  task and offers the shared red destructive `Delete` (entry-form parity);
+  the running task's Name is read-only (locked label) while its
+  Categories and Notes stay editable, and its delete shows an explicit
+  red error with shake + reject haptic on tap, durable undo otherwise
+  (pinned via `isEditingRunningTask` / `attemptDeleteEditingTask` /
+  `deleteBlockedMessage`).
+- [x] The composer row offers an editing-only detached circular ×
+  keyboard-dismiss control beside the card (Mail search-clear grammar)
+  and Return on an empty draft dismisses (the only submit-path resign
   allowed); valid submits never resign (pinned via
-  `shouldResignOnReturn`).
-- [x] The Today nav bar shows `<name> is in progress now`
-  (`L10n.plannerOutsideRun`, five locales + `L10n`) while a non-planner
-  timer runs; tapping a disabled Start shakes the subheader and plays the
-  reject haptic instead of starting (pinned via `outsideRunSubtitle` /
-  `startShouldReject` / `rejectDisabledStart`).
+  `shouldResignOnReturn` / `ComposerDismissVisibility`).
+- [x] Tapping a Start while a run is active shows the row's inline red
+  error (`L10n.plannerBlockedStart`, shaking + reject haptic) instead of
+  starting — no nav-bar subtitle, `planner.outsideRun` removed (pinned
+  via `blockedStartTaskID` / `startShouldReject` /
+  `rejectDisabledStart(for:)`).

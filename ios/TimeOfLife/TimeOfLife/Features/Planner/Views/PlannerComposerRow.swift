@@ -11,10 +11,11 @@ enum ComposerDismissVisibility {
 }
 
 /// The bottom-fixed Today composer card (day-planner 9.1/10.1/11.1/17.5,
-/// 7.1 no-resign, 18.3 dismiss): the persistent inline field in the shared
-/// `FieldCard` chrome (secondary background against the primary page,
-/// `minTapArea` minimum height, contrasting hairline border in both
-/// appearances), so it reads as a card apart from the list.
+/// 7.1 no-resign, 18.3 dismiss, 19.5 detached): the persistent inline field
+/// in the shared `FieldCard` chrome (secondary background against the
+/// primary page, `minTapArea` minimum height, contrasting hairline border
+/// in both appearances), so it reads as a card apart from the list, with
+/// the keyboard-dismiss control riding BESIDE it — never inside it.
 ///
 /// Return prepends one task at the top, clears the draft, and focus never
 /// leaves — the UIKit-backed field declines the Return default resign at
@@ -29,13 +30,14 @@ enum ComposerDismissVisibility {
 /// empties the draft without dismissing the keyboard or losing focus; its
 /// visibility follows the UIKit editing state mirrored from the field
 /// delegate (ground truth), not the focus flag (which only issues focus
-/// requests). While editing, a trailing keyboard-dismiss control
-/// (`keyboard.chevron.compact.down`, `L10n.plannerDismissKeyboard`) offers
-/// explicit keyboard dismissal without submitting; Return on an empty draft
-/// dismisses too — the only submit-path resign allowed (day-planner 18.3).
-/// The composer never unmounts and no layout jumps; the representable keeps
-/// its stable identity inside the card, so first-responder survival is
-/// unchanged.
+/// requests). While editing, a detached circular × button beside the card
+/// (Mail search-clear grammar: a dark filled circle with an xmark —
+/// `xmark.circle.fill` at full `textSecondary`, visually distinct from the
+/// card chrome) offers explicit keyboard dismissal without submitting;
+/// Return on an empty draft dismisses too — the only submit-path resign
+/// allowed (day-planner 18.3). The composer never unmounts and no layout
+/// jumps; the representable keeps its stable identity inside the card, so
+/// first-responder survival is unchanged.
 struct PlannerComposerRow: View {
     @ObservedObject var vm: PlannerViewModel
     /// Focus intent (issue #82 precedent — the binding belongs on the
@@ -43,61 +45,65 @@ struct PlannerComposerRow: View {
     let focused: FocusState<Bool>.Binding
     /// UIKit editing state of the field (drives clear/dismiss visibility).
     @Binding var editing: Bool
-    /// Dismiss requests (day-planner 18.3): the dismiss control bumps this;
-    /// the field resigns once per new value. Submit never touches it.
+    /// Dismiss requests (day-planner 18.3): the detached dismiss control
+    /// bumps this; the field resigns once per new value. Submit never
+    /// touches it.
     @Binding var dismissID: Int
 
     var body: some View {
-        FieldCard {
-            HStack(spacing: Theme.spacingSmall) {
-                Image(systemName: "plus")
-                    .foregroundStyle(Theme.textSecondary)
-                    .accessibilityHidden(true)
-                PlannerComposerField(
-                    text: $vm.draft,
-                    placeholder: L10n.plannerComposerPlaceholder.text,
-                    focused: focused,
-                    accessibilityIdentifier: "PlannerComposerField",
-                    dismissID: dismissID,
-                    onReturn: { Task { await vm.submit() } },
-                    onEditingChanged: { editing = $0 }
-                )
-                .accessibilityAction(named: Text(L10n.plannerAdd.text)) {
-                    Task { await vm.submit() }
-                }
-                if ClearButtonVisibility.shouldShow(isFocused: editing, text: vm.draft) {
-                    ClearTextButton(
-                        action: {
-                            vm.draft = ""
-                            focused.wrappedValue = true
-                        },
-                        accessibilityId: "PlannerComposerClear"
+        HStack(spacing: Theme.spacingSmall) {
+            FieldCard {
+                HStack(spacing: Theme.spacingSmall) {
+                    Image(systemName: "plus")
+                        .foregroundStyle(Theme.textSecondary)
+                        .accessibilityHidden(true)
+                    PlannerComposerField(
+                        text: $vm.draft,
+                        placeholder: L10n.plannerComposerPlaceholder.text,
+                        focused: focused,
+                        accessibilityIdentifier: "PlannerComposerField",
+                        dismissID: dismissID,
+                        onReturn: { Task { await vm.submit() } },
+                        onEditingChanged: { editing = $0 }
                     )
-                }
-                // Keyboard-dismiss control (day-planner 18.3): explicit
-                // user intent while editing — the field resigns without
-                // submitting. Same visibility family as the clear button
-                // (editing only), so an empty draft still offers a way off
-                // the keyboard alongside Return-on-empty.
-                if ComposerDismissVisibility.shouldShow(isEditing: editing) {
-                    Button {
-                        dismissID += 1
-                    } label: {
-                        Image(systemName: "keyboard.chevron.compact.down")
-                            .font(.system(size: 16))
-                            .foregroundStyle(Theme.textSecondary)
-                            .frame(
-                                minWidth: Theme.minTapArea,
-                                minHeight: Theme.minTapArea,
-                                alignment: .trailing
-                            )
-                            .padding(.trailing, Theme.spacingSmall)
-                            .contentShape(Rectangle())
+                    .accessibilityAction(named: Text(L10n.plannerAdd.text)) {
+                        Task { await vm.submit() }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(L10n.plannerDismissKeyboard.text)
-                    .accessibilityIdentifier("PlannerComposerDismiss")
+                    if ClearButtonVisibility.shouldShow(isFocused: editing, text: vm.draft) {
+                        ClearTextButton(
+                            action: {
+                                vm.draft = ""
+                                focused.wrappedValue = true
+                            },
+                            accessibilityId: "PlannerComposerClear"
+                        )
+                    }
                 }
+            }
+            // Detached keyboard-dismiss control (day-planner 19.5): an
+            // explicit user intent while editing — the field resigns
+            // without submitting. A sibling of the card (NOT inside it),
+            // so it reads apart from the composer surface; same
+            // editing-only visibility family as the clear button, so an
+            // empty draft still offers a way off the keyboard alongside
+            // Return-on-empty.
+            if ComposerDismissVisibility.shouldShow(isEditing: editing) {
+                Button {
+                    dismissID += 1
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(
+                            minWidth: Theme.minTapArea,
+                            minHeight: Theme.minTapArea,
+                            alignment: .center
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.plannerDismissKeyboard.text)
+                .accessibilityIdentifier("PlannerComposerDismiss")
             }
         }
         .padding(.horizontal, Theme.screenHorizontalPadding)

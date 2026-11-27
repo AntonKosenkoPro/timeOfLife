@@ -351,10 +351,13 @@ struct LogTimeView: View {
 
     // MARK: - Delete
 
-    /// Bottom-of-page destructive Delete (EDIT mode only).
+    /// Bottom-of-page destructive Delete (EDIT mode only): the plain
+    /// `Delete` control shared with the planner task editor sheet
+    /// (day-planner 19.3, HIG destructive wording — the former `Delete
+    /// entry` title diverged from it).
     private var deleteSection: some View {
         DestructiveBottomButton(
-            title: L10n.entryDelete.text,
+            title: L10n.entryDeleteConfirm.text,
             accessibilityId: "EntryDeleteButton"
         ) {
             isShowingDeleteConfirm = true

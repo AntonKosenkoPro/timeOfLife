@@ -208,7 +208,6 @@
 "entry.dismissLabel" = "Закрыть";
 "entry.confirmAddLabel" = "Добавить запись";
 "entry.confirmSaveLabel" = "Сохранить запись";
-"entry.delete" = "Удалить запись";
 "entry.deleteTitle" = "Удалить эту запись?";
 "entry.deleteMessage" = "Запись будет удалена. Отменить можно встряской.";
 "entry.deleteConfirm" = "Удалить";
@@ -364,4 +363,5 @@
 "planner.noMatch" = "Нет совпадений";
 "planner.reorder" = "Изменить порядок";
 "planner.dismissKeyboard" = "Скрыть клавиатуру";
-"planner.outsideRun" = "%1$@ выполняется сейчас";
+"planner.blockedStart" = "Нельзя начать задачу, пока идёт другая";
+"planner.deleteRunning" = "Нельзя удалить выполняющуюся задачу";

@@ -208,7 +208,6 @@
 "entry.dismissLabel" = "Close";
 "entry.confirmAddLabel" = "Add entry";
 "entry.confirmSaveLabel" = "Save entry";
-"entry.delete" = "Delete entry";
 "entry.deleteTitle" = "Delete this entry?";
 "entry.deleteMessage" = "This entry will be deleted. You can shake to undo.";
 "entry.deleteConfirm" = "Delete";
@@ -364,4 +363,5 @@
 "planner.noMatch" = "No matches";
 "planner.reorder" = "Reorder";
 "planner.dismissKeyboard" = "Dismiss keyboard";
-"planner.outsideRun" = "%1$@ is in progress now";
+"planner.blockedStart" = "You can't start a task while another is running";
+"planner.deleteRunning" = "You can't delete the running task";

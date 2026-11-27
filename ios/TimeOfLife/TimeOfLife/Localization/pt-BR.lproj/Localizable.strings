@@ -205,7 +205,6 @@
 "entry.dismissLabel" = "Fechar";
 "entry.confirmAddLabel" = "Adicionar entrada";
 "entry.confirmSaveLabel" = "Salvar entrada";
-"entry.delete" = "Apagar entrada";
 "entry.deleteTitle" = "Apagar esta entrada?";
 "entry.deleteMessage" = "Esta entrada será excluída. Chacoalhe para desfazer.";
 "entry.deleteConfirm" = "Apagar";
@@ -362,4 +361,5 @@
 "planner.noMatch" = "Sem correspondências";
 "planner.reorder" = "Reordenar";
 "planner.dismissKeyboard" = "Ocultar teclado";
-"planner.outsideRun" = "%1$@ está em andamento agora";
+"planner.blockedStart" = "Não é possível iniciar uma tarefa enquanto outra está em andamento";
+"planner.deleteRunning" = "Não é possível apagar a tarefa em andamento";

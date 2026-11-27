@@ -5,10 +5,13 @@ import UIKit
 @testable import TimeOfLife
 
 /// Day-planner §18: sheet subheader + bottom delete, reorder-only control,
-/// composer dismiss + empty-Return dismiss, outside-run nav subtitle.
+/// composer dismiss + empty-Return dismiss, disabled-Start reject gate.
+/// (§19 supersedes the 18.4 nav-bar subtitle with the row inline error and
+/// the 18.3 in-card dismiss with the detached ×; the subtitle tests and the
+/// old control tokens live in git history.)
 /// Pins VM helpers + one structural tripwire; haptics via the seam.
 @MainActor
-@Suite("Planner section 18 (sheet subheader, reorder, dismiss, outside subtitle)", .serialized)
+@Suite("Planner section 18 (sheet subheader, reorder, dismiss, reject gate)", .serialized)
 struct PlannerSection18Tests {
     // MARK: - Sheet subheader + delete (18.1)
 
@@ -156,64 +159,18 @@ struct PlannerSection18Tests {
         #expect(!ComposerDismissVisibility.shouldShow(isEditing: false))
     }
 
-    @Test("the composer row carries the dismiss control")
+    @Test("the composer row carries the detached dismiss control")
     func composerRowCarriesDismissControl() throws {
-        // Structural tripwire: the dismiss control SHALL stay mounted.
+        // Structural tripwire: the dismiss control SHALL stay mounted —
+        // detached beside the card (day-planner 19.5), never inside it.
         let source = try featureSource(named: "PlannerComposerRow.swift")
         #expect(source.contains("PlannerComposerDismiss"))
-        #expect(source.contains("keyboard.chevron.compact.down"))
+        #expect(source.contains("xmark.circle.fill"))
         #expect(source.contains("plannerDismissKeyboard"))
+        #expect(!source.contains("keyboard.chevron.compact.down"), "the in-card chevron dismiss must not come back")
     }
 
-    // MARK: - Outside-run subtitle + disabled Start (18.4)
-
-    @Test("no subheader while idle")
-    func noSubtitleWhenIdle() async throws {
-        let (vm, _, _, _) = await makeContext()
-        await vm.loadIfNeeded()
-        #expect(vm.outsideRunSubtitle == nil)
-    }
-
-    @Test("no subheader while the run is planner-linked")
-    func noSubtitleWhenLinked() async throws {
-        let (vm, _, _, _) = await makeContext()
-        await vm.loadIfNeeded()
-        vm.draft = "A"
-        await vm.submit()
-        #expect(await vm.startTask(try #require(vm.snapshot.tasks.first)))
-        vm.invalidate()
-        await vm.loadIfNeeded()
-        #expect(vm.timerActive)
-        #expect(vm.linkedTaskID != nil)
-        #expect(vm.outsideRunSubtitle == nil)
-    }
-
-    @Test("an ordinary run names itself in the subheader")
-    func ordinaryRunNamesSubheader() async throws {
-        let (vm, store, _, _) = await makeContext()
-        await vm.loadIfNeeded()
-        try await store.saveTimerDraft(activityText: "Read docs", categoryIDs: [], startedAt: Date())
-        vm.invalidate()
-        await vm.loadIfNeeded()
-        #expect(vm.timerActive)
-        #expect(vm.linkedTaskID == nil)
-        // The en copy is pinned through the explicit bundle (locale-proof,
-        // the `notesPlaceholders` precedent); the VM threads the live name
-        // through it.
-        let format = try enString(for: "planner.outsideRun")
-        #expect(format == "%1$@ is in progress now")
-        #expect(vm.outsideRunSubtitle == String(format: format, "Read docs"))
-    }
-
-    @Test("the preload + adopt path carries the outside-run name")
-    func preloadAdoptCarriesOutsideName() async throws {
-        let (vm, store, _, _) = await makeContext()
-        try await store.saveTimerDraft(activityText: "Read docs", categoryIDs: [], startedAt: Date())
-        let preloaded = try await PlannerViewModel.preload(store: store)
-        vm.adopt(preloaded)
-        let format = try enString(for: "planner.outsideRun")
-        #expect(vm.outsideRunSubtitle == String(format: format, "Read docs"))
-    }
+    // MARK: - Disabled Start reject gate (18.4; error UI in §19)
 
     @Test("a disabled Start tap rejects with the haptic and starts nothing")
     func disabledStartRejects() async throws {
@@ -229,7 +186,7 @@ struct PlannerSection18Tests {
         vm.invalidate()
         await vm.loadIfNeeded()
         #expect(vm.startShouldReject(task))
-        vm.rejectDisabledStart()
+        vm.rejectDisabledStart(for: task)
         #expect(recorded.events == [.success, .reject])
         // Starts nothing: the stored draft is untouched and `startTask`
         // still refuses the replacement at the store boundary.
@@ -364,30 +321,6 @@ struct PlannerSection18Tests {
             if let found = findComposerField(in: subview) { return found }
         }
         return nil
-    }
-
-    /// Recursive accessibility-identifier lookup for the composer field
-    /// (a real `UITextField`, so its identifier IS in the UIKit hierarchy —
-    /// SwiftUI-rendered identifiers live in the AX tree instead and must
-    /// never be asserted through a UIView walk).
-    private func findView(withIdentifier identifier: String, in view: UIView) -> UIView? {
-        if view.accessibilityIdentifier == identifier { return view }
-        for subview in view.subviews {
-            if let found = findView(withIdentifier: identifier, in: subview) { return found }
-        }
-        return nil
-    }
-
-    /// Resolves a key through the explicit `en` bundle (the
-    /// `notesPlaceholders` precedent): exact-copy assertions that hold in
-    /// any test-runner locale.
-    private func enString(for key: String) throws -> String {
-        let path = try #require(
-            Bundle.main.path(forResource: "en", ofType: "lproj"),
-            "en.lproj missing in main bundle"
-        )
-        let bundle = try #require(Bundle(path: path))
-        return NSLocalizedString(key, bundle: bundle, comment: "")
     }
 }
 

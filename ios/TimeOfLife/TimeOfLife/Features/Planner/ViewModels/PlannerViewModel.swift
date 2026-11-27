@@ -85,12 +85,16 @@ final class PlannerViewModel: ObservableObject {
     /// The linked task id of the active run, if any (the `In progress` row
     /// reads it; nil for ordinary runs and when idle).
     @Published private(set) var linkedTaskID: String?
-    /// The active run's entry name (day-planner 18.4): backs the Today
-    /// nav-bar `<name> is in progress now` subheader while the run is NOT
-    /// planner-linked. Nil when idle, when the draft has no name, and on
-    /// the linked path (the linked run's indicator is the row's
-    /// `In progress` label, never this).
-    @Published private(set) var runningName: String?
+    /// The task id whose blocked Start tap last showed the inline error
+    /// (day-planner 19.1): set by `rejectDisabledStart(for:)` while a run
+    /// is active, read by the row for the red shaking error. Cleared when
+    /// the run goes idle (in `load()`) and when a Start succeeds.
+    @Published private(set) var blockedStartTaskID: String?
+    /// The explicit blocked-delete error (day-planner 19.2): set when the
+    /// running task's disabled delete is tapped, read by the sheet for the
+    /// red error under the Delete control. A fresh sheet scope
+    /// (`beginEdit`) and a successful save clear it.
+    @Published private(set) var deleteBlockedMessage: String?
     /// The category catalog backing row icons, keyed by id.
     @Published private(set) var categoryByID: [String: Category] = [:]
     /// Non-field recoverable error (persistence failures).
@@ -219,7 +223,9 @@ final class PlannerViewModel: ObservableObject {
             recents = fetchedRecents
             timerActive = draft != nil
             linkedTaskID = draft?.plannerTaskID
-            runningName = draft?.plannerTaskID == nil ? draft?.activityText : nil
+            // A blocked-Start error belongs to an active run (day-planner
+            // 19.1): when the run goes idle the error clears with it.
+            if !timerActive { blockedStartTaskID = nil }
             categoryByID = Dictionary(uniqueKeysWithValues: fetchedCategories.map { ($0.id, $0) })
             availableCategories = fetchedCategories
             // A submit-then-load round-trip animates only the fresh row's
@@ -262,7 +268,6 @@ final class PlannerViewModel: ObservableObject {
             recents: try await store.recents(limit: chipPoolLimit),
             timerActive: draft != nil,
             linkedTaskID: draft?.plannerTaskID,
-            runningName: draft?.plannerTaskID == nil ? draft?.activityText : nil,
             categories: try await store.categories(),
             snapshot: PlannerToday.project(tasks: tasks, on: today)
         )
@@ -281,41 +286,31 @@ final class PlannerViewModel: ObservableObject {
         recents = preloaded.recents
         timerActive = preloaded.timerActive
         linkedTaskID = preloaded.linkedTaskID
-        runningName = preloaded.runningName
         categoryByID = Dictionary(uniqueKeysWithValues: preloaded.categories.map { ($0.id, $0) })
         availableCategories = preloaded.categories
         snapshot = preloaded.snapshot
         needsReload = false
     }
 
-    /// The Today nav-bar subtitle while a NON-planner timer runs
-    /// (day-planner 18.4): `<name> is in progress now`. Nil when idle,
-    /// when the draft carries no name, and when the run is planner-linked
-    /// (the linked run's indicator is the row's `In progress` label).
-    /// Pinned here — SwiftUI rendering is not unit-testable (the
-    /// `PlannerStartSlot` precedent).
-    var outsideRunSubtitle: String? {
-        guard timerActive, linkedTaskID == nil else { return nil }
-        guard let name = runningName, !name.isEmpty else { return nil }
-        return String(format: L10n.plannerOutsideRun.text, locale: .current, name)
-    }
-
     /// Whether a Start tap must reject instead of starting (day-planner
     /// 18.4): a run is active and the task is open. Completed rows never
     /// fire (their slot stays disabled and hidden) and the running row
     /// shows no Start at all, so the view only consults this for a visible
-    /// Start under an active run. Pinned here — same precedent.
+    /// Start under an active run. When rejected the row shows the inline
+    /// blocked-Start error (day-planner 19.1) instead of starting.
+    /// Pinned here — same precedent.
     func startShouldReject(_ task: PlannerTask) -> Bool {
         timerActive && task.completedOn == nil
     }
 
-    /// Feedback for a rejected Start tap (day-planner 18.4): plays the
-    /// reject haptic through the injected seam (test double; the generator
-    /// never fires headless). Starts nothing — the caller must not call
-    /// `startTask` on this path. The caller shakes the nav-bar subheader
-    /// (suppressed under Reduce Motion — the haptic is the non-motion
-    /// channel there).
-    func rejectDisabledStart() {
+    /// Feedback for a rejected Start tap (day-planner 19.1): records the
+    /// blocked task for the row's inline red error and plays the reject
+    /// haptic through the injected seam (test double; the generator never
+    /// fires headless). Starts nothing — the caller must not call
+    /// `startTask` on this path. The caller shakes the error (suppressed
+    /// under Reduce Motion — the haptic is the non-motion channel there).
+    func rejectDisabledStart(for task: PlannerTask) {
+        blockedStartTaskID = task.id
         playHaptic(.reject)
     }
 
@@ -487,6 +482,7 @@ final class PlannerViewModel: ObservableObject {
     func beginEdit(_ task: PlannerTask) {
         guard task.completedOn == nil else { return }
         errorMessage = nil
+        deleteBlockedMessage = nil
         editingTask = task
         sheetName = task.name
         sheetCategoryIDs = task.categoryIDs
@@ -559,6 +555,7 @@ final class PlannerViewModel: ObservableObject {
             }
             editingTask = nil
             errorMessage = nil
+            deleteBlockedMessage = nil
             invalidate()
             await loadIfNeeded()
             return true
@@ -584,13 +581,15 @@ final class PlannerViewModel: ObservableObject {
     /// outbox row yet, restorable through the system Undo confirmation
     /// (`delete(at:)` precedent). Reloads the snapshot on success. Returns
     /// whether the sheet closed. When the sheet edits the running task the
-    /// delete is disabled: plays the reject haptic through the injected
-    /// seam, deletes nothing, and returns false with the sheet open — the
-    /// caller shakes the subheader instead (suppressed under Reduce
-    /// Motion; the haptic is the non-motion channel there).
+    /// delete is disabled: shows the explicit red running-delete error
+    /// (day-planner 19.2) and plays the reject haptic through the injected
+    /// seam, deleting nothing, and returns false with the sheet open — the
+    /// caller shakes the error instead (suppressed under Reduce Motion;
+    /// the haptic is the non-motion channel there).
     func attemptDeleteEditingTask() async -> Bool {
         guard let editing = editingTask else { return false }
         guard !isEditingRunningTask else {
+            deleteBlockedMessage = L10n.plannerDeleteRunning.text
             playHaptic(.reject)
             return false
         }
@@ -598,6 +597,7 @@ final class PlannerViewModel: ObservableObject {
             _ = try await store.deletePlannerTaskUndoable(id: editing.id)
             editingTask = nil
             errorMessage = nil
+            deleteBlockedMessage = nil
             invalidate()
             await loadIfNeeded()
             return true
@@ -797,13 +797,17 @@ final class PlannerViewModel: ObservableObject {
             let inherited = task.categoryIDs.isEmpty
                 ? recents.first { $0.activityText == task.name }?.categoryIDs ?? []
                 : task.categoryIDs
-            return try await timer.startLinkedTask(
+            let started = try await timer.startLinkedTask(
                 name: task.name,
                 categoryIDs: inherited,
                 notes: task.notes,
                 taskID: task.id,
                 startedAt: Date()
             )
+            // A Start that fires clears any blocked-Start error from an
+            // earlier run (day-planner 19.1): a live run owns the gate now.
+            if started { blockedStartTaskID = nil }
+            return started
         } catch {
             errorMessage = L10n.text(in: .default, code: "error.unknown")
             return false
