@@ -16,10 +16,6 @@ Track SHALL offer a compact, accessible progress control that opens the Today pl
 - **WHEN** a linked Stop completes a task
 - **THEN** the control updates to the new done/total counts without further navigation
 
-#### Scenario: Outside run shows in the subheader
-- **WHEN** a timer runs that is not linked to any planner task
-- **THEN** the Today navigation bar shows a `<name> is in progress now` subheader naming the running entry
-
 #### Scenario: Icon follows completion
 - **WHEN** Today holds no done tasks, some done tasks, or all tasks done (non-empty)
 - **THEN** the control renders `checklist.unchecked`, `checklist`, or `checklist.checked` respectively
