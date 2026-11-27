@@ -146,3 +146,9 @@
 
 - [ ] 23.1 Re-diagnose: the §22 intent-clear races correctly in sim but empty Return still never dismisses on the owner's device (owner-verified on the §22 build). Suspects in order: (a) the coordinator's `parent.focused.wrappedValue = false` write goes nowhere because the coordinator holds a STALE STRUCT COPY of the representable (verify write propagation end-to-end in a hosted test that reads back `composerFocused` after empty Return); (b) a SwiftUI `.onSubmit` handler or `onAppear`-style refocus (`if draft.isEmpty { focused = true }`) re-asserts after the resign; (c) an `updateUIView` write path re-grabs (e.g. text sync on publish). Failing-first test that models the ACTUAL re-grabber, then fix.
 - [ ] 23.2 Run `swiftlint lint --strict`, warning-free build, full simulator suite, and `openspec validate --all --strict` green; rebuild Release, reinstall on the device, relaunch, and verify empty-Return dismiss AND stays dismissed on device; valid submit still holds the keyboard.
+
+## 24. End-echo plus drag dismiss
+
+- [ ] 24.1 Observe actual first-responder state in the composer (end-echo) so every genuine resign sticks and no update pass can re-grab; failing-first test modeling the device re-grab (resign → update storm → assert stays resigned). Valid-submit no-resign unregressed.
+- [ ] 24.2 Add interactive drag-to-dismiss on the task list (Messages grammar); drafts, chips, and selection untouched, nothing submits; regression tests.
+- [ ] 24.3 Run `swiftlint lint --strict`, warning-free build, full simulator suite, and `openspec validate --all --strict` green; rebuild Release, reinstall on the device, relaunch, and verify empty-Return dismiss, drag dismiss, and valid-submit stillness on device.
