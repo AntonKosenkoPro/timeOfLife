@@ -36,9 +36,6 @@ struct PlannerView: View {
     /// haptic instead of starting (NotesEditorPage overcount grammar —
     /// suppressed under Reduce Motion, the haptic still fires).
     @State private var blockedStartShakeAttempts = 0
-    /// Composer dismiss requests (day-planner 18.3): the dismiss control
-    /// bumps this; the field resigns once per new value.
-    @State private var composerDismissID = 0
     /// Under Reduce Motion the reject shake is suppressed (the reject
     /// haptic is the non-motion channel).
     @Environment(\.accessibilityReduceMotion)
@@ -147,15 +144,13 @@ struct PlannerView: View {
     /// The persistent inline field (see `PlannerComposerRow`): Return
     /// prepends one task at the top, clears the draft, and focus never
     /// leaves; no visible Add button; a leading plus, a trailing clear
-    /// button, and — while editing — a detached circular keyboard-dismiss
-    /// control beside the card (Return on an empty draft dismisses too,
-    /// the only submit-path resign allowed).
+    /// button, and — on an empty draft — Return dismisses the keyboard
+    /// (the sole dismiss path).
     private var composer: some View {
         PlannerComposerRow(
             vm: vm,
             focused: $composerFocused,
-            editing: $composerEditing,
-            dismissID: $composerDismissID
+            editing: $composerEditing
         )
     }
 

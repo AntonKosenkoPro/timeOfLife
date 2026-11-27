@@ -360,6 +360,5 @@
 "planner.reopen" = "Reabrir";
 "planner.noMatch" = "Sin coincidencias";
 "planner.reorder" = "Reordenar";
-"planner.dismissKeyboard" = "Ocultar el teclado";
 "planner.blockedStart" = "No puedes iniciar una tarea mientras otra está en curso";
 "planner.deleteRunning" = "No puedes eliminar la tarea en curso";

@@ -362,6 +362,5 @@
 "planner.reopen" = "Reopen";
 "planner.noMatch" = "No matches";
 "planner.reorder" = "Reorder";
-"planner.dismissKeyboard" = "Dismiss keyboard";
 "planner.blockedStart" = "You can't start a task while another is running";
 "planner.deleteRunning" = "You can't delete the running task";

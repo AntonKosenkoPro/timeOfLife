@@ -360,6 +360,5 @@
 "planner.reopen" = "Reabrir";
 "planner.noMatch" = "Sem correspondências";
 "planner.reorder" = "Reordenar";
-"planner.dismissKeyboard" = "Ocultar teclado";
 "planner.blockedStart" = "Não é possível iniciar uma tarefa enquanto outra está em andamento";
 "planner.deleteRunning" = "Não é possível apagar a tarefa em andamento";

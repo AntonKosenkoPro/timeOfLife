@@ -153,7 +153,6 @@ enum LocalizationSnapshot {
         "planner.blockedStart",
         "planner.composerPlaceholder",
         "planner.deleteRunning",
-        "planner.dismissKeyboard",
         "planner.editorTitle",
         "planner.emptyHint",
         "planner.inProgress",

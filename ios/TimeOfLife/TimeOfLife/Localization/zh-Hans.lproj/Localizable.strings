@@ -360,6 +360,5 @@
 "planner.reopen" = "重新打开";
 "planner.noMatch" = "无匹配项";
 "planner.reorder" = "重新排序";
-"planner.dismissKeyboard" = "收起键盘";
 "planner.blockedStart" = "已有任务在进行，无法开始";
 "planner.deleteRunning" = "无法删除正在进行的任务";

@@ -1,21 +1,10 @@
 import SwiftUI
 
-/// Visibility rule for the composer keyboard-dismiss control (day-planner
-/// 18.3): shown whenever the field is being edited — including an empty
-/// draft, whose only other way off the keyboard is Return-on-empty.
-/// Text-independent, unlike `ClearButtonVisibility` (which also needs
-/// non-empty text). Pinned here because SwiftUI mounting is not
-/// unit-testable (the `ClearButtonVisibility` precedent).
-enum ComposerDismissVisibility {
-    static func shouldShow(isEditing: Bool) -> Bool { isEditing }
-}
-
 /// The bottom-fixed Today composer card (day-planner 9.1/10.1/11.1/17.5,
-/// 7.1 no-resign, 18.3 dismiss, 19.5 detached): the persistent inline field
+/// 7.1 no-resign, 21.1 no dismiss button): the persistent inline field
 /// in the shared `FieldCard` chrome (secondary background against the
 /// primary page, `minTapArea` minimum height, contrasting hairline border
-/// in both appearances), so it reads as a card apart from the list, with
-/// the keyboard-dismiss control riding BESIDE it — never inside it.
+/// in both appearances), so it reads as a card apart from the list.
 ///
 /// Return prepends one task at the top, clears the draft, and focus never
 /// leaves — the UIKit-backed field declines the Return default resign at
@@ -30,12 +19,9 @@ enum ComposerDismissVisibility {
 /// empties the draft without dismissing the keyboard or losing focus; its
 /// visibility follows the UIKit editing state mirrored from the field
 /// delegate (ground truth), not the focus flag (which only issues focus
-/// requests). While editing, a detached circular × button beside the card
-/// (Mail search-clear grammar: a dark filled circle with an xmark —
-/// `xmark.circle.fill` at full `textSecondary`, visually distinct from the
-/// card chrome) offers explicit keyboard dismissal without submitting;
-/// Return on an empty draft dismisses too — the only submit-path resign
-/// allowed (day-planner 18.3). The composer never unmounts and no layout
+/// requests). Return on an empty draft dismisses the keyboard — the only
+/// submit-path resign allowed and the only keyboard-dismiss path (no
+/// dismiss button). The composer never unmounts and no layout
 /// jumps; the representable keeps its stable identity inside the card, so
 /// first-responder survival is unchanged.
 struct PlannerComposerRow: View {
@@ -43,12 +29,9 @@ struct PlannerComposerRow: View {
     /// Focus intent (issue #82 precedent — the binding belongs on the
     /// field itself, passed straight through to `PlannerComposerField`).
     let focused: FocusState<Bool>.Binding
-    /// UIKit editing state of the field (drives clear/dismiss visibility).
+    /// UIKit editing state of the field (drives the clear-button
+    /// visibility).
     @Binding var editing: Bool
-    /// Dismiss requests (day-planner 18.3): the detached dismiss control
-    /// bumps this; the field resigns once per new value. Submit never
-    /// touches it.
-    @Binding var dismissID: Int
 
     var body: some View {
         HStack(spacing: Theme.spacingSmall) {
@@ -62,7 +45,6 @@ struct PlannerComposerRow: View {
                         placeholder: L10n.plannerComposerPlaceholder.text,
                         focused: focused,
                         accessibilityIdentifier: "PlannerComposerField",
-                        dismissID: dismissID,
                         onReturn: { Task { await vm.submit() } },
                         onEditingChanged: { editing = $0 }
                     )
@@ -79,31 +61,6 @@ struct PlannerComposerRow: View {
                         )
                     }
                 }
-            }
-            // Detached keyboard-dismiss control (day-planner 19.5): an
-            // explicit user intent while editing — the field resigns
-            // without submitting. A sibling of the card (NOT inside it),
-            // so it reads apart from the composer surface; same
-            // editing-only visibility family as the clear button, so an
-            // empty draft still offers a way off the keyboard alongside
-            // Return-on-empty.
-            if ComposerDismissVisibility.shouldShow(isEditing: editing) {
-                Button {
-                    dismissID += 1
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(Theme.textSecondary)
-                        .frame(
-                            minWidth: Theme.minTapArea,
-                            minHeight: Theme.minTapArea,
-                            alignment: .center
-                        )
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(L10n.plannerDismissKeyboard.text)
-                .accessibilityIdentifier("PlannerComposerDismiss")
             }
         }
         .padding(.horizontal, Theme.screenHorizontalPadding)

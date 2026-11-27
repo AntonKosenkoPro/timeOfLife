@@ -3,11 +3,14 @@ import Foundation
 @testable import TimeOfLife
 
 /// Day-planner §19: the blocked-Start inline error, the explicit
-/// running-delete error, the aligned red destructive `Delete`, the
-/// read-only running name, and the detached circular dismiss.
+/// running-delete error, the aligned red destructive `Delete`, and the
+/// read-only running name. (§21 deletes the 19.5 detached dismiss — the
+/// control tokens live in git history; the sole dismiss path is Return on
+/// an empty draft, pinned by the §18 `emptyReturnDispatchResigns` test and
+/// the absence tripwire below.)
 /// Pins VM helpers + structural tripwires; haptics via the seam.
 @MainActor
-@Suite("Planner section 19 (explicit errors, aligned Delete, read-only name, detached dismiss)", .serialized)
+@Suite("Planner section 19 (explicit errors, aligned Delete, read-only name)", .serialized)
 struct PlannerSection19Tests {
     // MARK: - 19.1 blocked-Start error
 
@@ -219,25 +222,26 @@ struct PlannerSection19Tests {
         #expect(!nameCard.contains("NavigationLink"), "the locked Name must not push the picker")
     }
 
-    // MARK: - 19.5 detached dismiss
+    // MARK: - 21.1 no dismiss button (Return on empty is the sole path)
 
-    @Test("the dismiss control shows while editing, even for an empty draft")
-    func dismissVisibilityRule() {
-        // Editing-only (the `ClearButtonVisibility` precedent): unchanged
-        // by the detach — only the placement moved.
-        #expect(ComposerDismissVisibility.shouldShow(isEditing: true))
-        #expect(!ComposerDismissVisibility.shouldShow(isEditing: false))
-    }
-
-    @Test("the dismiss control rides beside the card as a detached circle")
-    func dismissRidesBesideTheCard() throws {
+    @Test("no dismiss control remains in the composer")
+    func noDismissControlRemains() throws {
+        // Structural tripwire (day-planner 21.1): there is no separate
+        // dismiss button — Return on an empty draft is the only
+        // keyboard-dismiss path. A reintroduction of any token fails loudly
+        // here; the empty-Return path stays pinned by the §18
+        // `emptyReturnDispatchResigns` test and valid-submit no-resign by
+        // the 7.1 focus-lifetime suite.
         let row = try timeOfLifeSource(relativePath: "TimeOfLife/Features/Planner/Views/PlannerComposerRow.swift")
-        #expect(row.contains("PlannerComposerDismiss"), "the dismiss control is missing")
-        #expect(row.contains("xmark.circle.fill"), "the dismiss must use the Mail search-clear circle")
-        #expect(row.contains("dismissID += 1"), "the dismiss must resign through the dismiss request")
-        #expect(!row.contains("keyboard.chevron.compact.down"), "the in-card chevron must not come back")
-        let card = try closureBody(in: row, marker: "FieldCard {")
-        #expect(!card.contains("PlannerComposerDismiss"), "the dismiss must not live inside the card")
+        #expect(!row.contains("PlannerComposerDismiss"), "the dismiss control must not come back")
+        #expect(!row.contains("ComposerDismissVisibility"), "the dismiss visibility rule must not come back")
+        #expect(!row.contains("dismissID"), "the dismiss request path must not come back")
+        let field = try timeOfLifeSource(relativePath: "TimeOfLife/Features/Planner/Views/PlannerComposerField.swift")
+        #expect(!field.contains("dismissID"), "the field dismiss path must not come back")
+        #expect(!field.contains("lastDismissID"), "the dismiss honor record must not come back")
+        let view = try timeOfLifeSource(relativePath: "TimeOfLife/Features/Planner/Views/PlannerView.swift")
+        #expect(!view.contains("composerDismissID"), "the view dismiss state must not come back")
+        #expect(!view.contains("PlannerComposerDismiss"), "the dismiss control must not come back")
     }
 
     // MARK: - Helpers

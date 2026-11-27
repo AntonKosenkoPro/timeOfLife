@@ -362,6 +362,5 @@
 "planner.reopen" = "Вернуть";
 "planner.noMatch" = "Нет совпадений";
 "planner.reorder" = "Изменить порядок";
-"planner.dismissKeyboard" = "Скрыть клавиатуру";
 "planner.blockedStart" = "Нельзя начать задачу, пока идёт другая";
 "planner.deleteRunning" = "Нельзя удалить выполняющуюся задачу";

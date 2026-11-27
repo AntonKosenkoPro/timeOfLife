@@ -5,13 +5,14 @@ import UIKit
 @testable import TimeOfLife
 
 /// Day-planner §18: sheet subheader + bottom delete, reorder-only control,
-/// composer dismiss + empty-Return dismiss, disabled-Start reject gate.
-/// (§19 supersedes the 18.4 nav-bar subtitle with the row inline error and
-/// the 18.3 in-card dismiss with the detached ×; the subtitle tests and the
-/// old control tokens live in git history.)
+/// empty-Return dismiss, disabled-Start reject gate.
+/// (§19 supersedes the 18.4 nav-bar subtitle with the row inline error;
+/// §21 deletes the 18.3/19.5 dismiss control — Return on an empty draft is
+/// the sole dismiss path. The subtitle tests and the old control tokens
+/// live in git history.)
 /// Pins VM helpers + one structural tripwire; haptics via the seam.
 @MainActor
-@Suite("Planner section 18 (sheet subheader, reorder, dismiss, reject gate)", .serialized)
+@Suite("Planner section 18 (sheet subheader, reorder, empty-Return dismiss, reject gate)", .serialized)
 struct PlannerSection18Tests {
     // MARK: - Sheet subheader + delete (18.1)
 
@@ -148,26 +149,6 @@ struct PlannerSection18Tests {
             defer { NotificationCenter.default.removeObserver(token) }
             _ = ctx.field.resignFirstResponder()
         }
-    }
-
-    @Test("the dismiss control shows while editing, even for an empty draft")
-    func dismissVisibilityRule() {
-        // Editing-only (the `ClearButtonVisibility` precedent): unlike the
-        // clear button the rule is text-independent — an empty draft must
-        // still offer the explicit way off the keyboard.
-        #expect(ComposerDismissVisibility.shouldShow(isEditing: true))
-        #expect(!ComposerDismissVisibility.shouldShow(isEditing: false))
-    }
-
-    @Test("the composer row carries the detached dismiss control")
-    func composerRowCarriesDismissControl() throws {
-        // Structural tripwire: the dismiss control SHALL stay mounted —
-        // detached beside the card (day-planner 19.5), never inside it.
-        let source = try featureSource(named: "PlannerComposerRow.swift")
-        #expect(source.contains("PlannerComposerDismiss"))
-        #expect(source.contains("xmark.circle.fill"))
-        #expect(source.contains("plannerDismissKeyboard"))
-        #expect(!source.contains("keyboard.chevron.compact.down"), "the in-card chevron dismiss must not come back")
     }
 
     // MARK: - Disabled Start reject gate (18.4; error UI in §19)
