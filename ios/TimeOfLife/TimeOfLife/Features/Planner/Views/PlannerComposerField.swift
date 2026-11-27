@@ -23,6 +23,16 @@ struct PlannerComposerField: UIViewRepresentable {
     /// itself — never on a wrapper container).
     let focused: FocusState<Bool>.Binding
     let accessibilityIdentifier: String
+    /// External dismiss requests (day-planner 18.3): the composer row's
+    /// dismiss control and any other explicit user intent bump this; the
+    /// coordinator resigns once per new value. Starts at zero and the
+    /// coordinator records what it has honored, so mounting never resigns.
+    /// Submit never touches this — the valid-submit path still declines the
+    /// resign (7.1) and the ONLY submit-path resign allowed is Return on an
+    /// empty draft (see `shouldResignOnReturn`). Declared before the two
+    /// closures so they stay adjacent at call sites (SwiftLint
+    /// `trailing_closure`).
+    let dismissID: Int
     /// Fired on Return INSTEAD of the default resign (the view submits the
     /// composer draft, as the old `onSubmit` did).
     let onReturn: () -> Void
@@ -31,6 +41,17 @@ struct PlannerComposerField: UIViewRepresentable {
     /// UIKit-side focus back, so reading it for visibility stays stale.
     /// The delegate is ground truth for "while editing".
     var onEditingChanged: (Bool) -> Void = { _ in }
+
+    /// Whether the Return key may take its default resign instead of
+    /// submitting (day-planner 18.3): an empty (or whitespace-only) draft
+    /// is invalid for submit, so Return dismisses the keyboard — the only
+    /// submit-path resign allowed. Any submittable text declines the
+    /// resign and runs `onReturn` instead (day-planner 7.1, pinned by the
+    /// focus-lifetime suite). Pinned here because the dispatch verdict is
+    /// unit-testable while the resign itself is UIKit default behavior.
+    static func shouldResignOnReturn(text: String) -> Bool {
+        ActivityName.normalized(text).isEmpty
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -80,6 +101,14 @@ struct PlannerComposerField: UIViewRepresentable {
             uiView.placeholder = placeholder
         }
         uiView.accessibilityIdentifier = accessibilityIdentifier
+        // Explicit user-intent dismiss (day-planner 18.3: the composer
+        // row's dismiss control): resign once per new request. The
+        // coordinator records what it honored, so mounting (both zero)
+        // never resigns and repeats never double-fire.
+        if uiView.isFirstResponder, dismissID != context.coordinator.lastDismissID {
+            context.coordinator.lastDismissID = dismissID
+            uiView.resignFirstResponder()
+        }
         // Become-only, mirroring SwiftUI `.focused`: the binding asserts
         // focus (initial entry, chip tap) and the begin-echo keeps it
         // truthful, so any update while unfocused re-asserts. Resigns arrive
@@ -91,6 +120,10 @@ struct PlannerComposerField: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextFieldDelegate {
         private var parent: PlannerComposerField
+        /// The dismiss request already honored (see `dismissID`): compared
+        /// in `updateUIView`, never written back into the binding — a
+        /// per-representable record, so a remount starts clean.
+        var lastDismissID = 0
 
         init(_ parent: PlannerComposerField) {
             self.parent = parent
@@ -101,9 +134,15 @@ struct PlannerComposerField: UIViewRepresentable {
             parent.text = field.text ?? ""
         }
 
-        /// Suppresses the Return default: submits WITHOUT resigning, so the
+        /// Return dispatch (day-planner 18.3): an empty draft takes the
+        /// default resign — the keyboard dismisses, the ONLY submit-path
+        /// resign allowed. Anything else submits WITHOUT resigning, so the
         /// keyboard never animates away regardless of round-trip latency.
+        /// The verdict reads the field itself (ground truth at dispatch),
+        /// not the binding (which the in-flight keystroke may not have
+        /// echoed yet).
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            if PlannerComposerField.shouldResignOnReturn(text: textField.text ?? "") { return true }
             parent.onReturn()
             return false
         }

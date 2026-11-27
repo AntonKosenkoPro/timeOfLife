@@ -26,6 +26,23 @@ struct PlannerView: View {
     /// Whether the software keyboard is open: the chips line mounts only
     /// then (day-planner 8.2), pinned just above it as the last slot.
     @State private var keyboardVisible = false
+    /// Reorder mode (day-planner 18.2): the dedicated reorder control owns
+    /// this — there is no Edit button and no edit-mode deletion UI. While
+    /// active the list's `onMove` handles show drag handles (and the rotor
+    /// reorder path stays live); delete affordances never appear.
+    @State private var isReordering = false
+    /// Nav-bar subheader shake attempts (day-planner 18.4): a disabled
+    /// Start tap shakes the principal stack and plays the reject haptic
+    /// instead of starting (NotesEditorPage overcount grammar — suppressed
+    /// under Reduce Motion, the haptic still fires).
+    @State private var subtitleShakeAttempts = 0
+    /// Composer dismiss requests (day-planner 18.3): the dismiss control
+    /// bumps this; the field resigns once per new value.
+    @State private var composerDismissID = 0
+    /// Under Reduce Motion the reject shake is suppressed (the reject
+    /// haptic is the non-motion channel).
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
     /// UIKit editing state of the composer (day-planner 11.1): drives the
     /// trailing clear button — the `composerFocused` flag only issues
     /// focus requests and never observes UIKit-side focus back.
@@ -34,16 +51,46 @@ struct PlannerView: View {
         content
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // The running timer's only indicator is the accent `In
-                // progress` label on its row (day-planner 16.1) — no nav-bar
-                // subtitle, no inline caption.
+                // The running indicator depends on the run (day-planner
+                // 18.4): a planner-linked run reads the accent `In
+                // progress` label on its row (no nav-bar subtitle); a
+                // NON-planner run names itself in the nav-bar subheader
+                // (`<name> is in progress now`) so a disabled Start tap has
+                // a subheader to shake.
                 ToolbarItem(placement: .principal) {
-                    Text(L10n.plannerTitle.text)
-                        .font(.headline)
+                    VStack(spacing: 0) {
+                        Text(L10n.plannerTitle.text)
+                            .font(.headline)
+                        if let subtitle = vm.outsideRunSubtitle {
+                            Text(subtitle)
+                                .font(.footnote)
+                                .foregroundStyle(Theme.textSecondary)
+                                .lineLimit(1)
+                                .accessibilityIdentifier("PlannerOutsideRunSubtitle")
+                        }
+                    }
+                    .keyframeAnimator(initialValue: CGFloat.zero, trigger: subtitleShakeAttempts) { content, value in
+                        content.offset(x: value)
+                    } keyframes: { _ in
+                        KeyframeTrack {
+                            CubicKeyframe(12, duration: 0.06)
+                            CubicKeyframe(-9, duration: 0.06)
+                            CubicKeyframe(6, duration: 0.06)
+                            CubicKeyframe(-3, duration: 0.06)
+                            CubicKeyframe(0, duration: 0.06)
+                        }
+                    }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                        .accessibilityIdentifier("PlannerEditButton")
+                    Button {
+                        isReordering.toggle()
+                    } label: {
+                        Label(
+                            L10n.plannerReorder.text,
+                            systemImage: isReordering ? "checkmark" : "arrow.up.arrow.down"
+                        )
+                    }
+                    .accessibilityIdentifier("PlannerReorderButton")
                 }
             }
             .task { await reloadAndRegister() }
@@ -118,58 +165,18 @@ struct PlannerView: View {
 
     // MARK: - Composer (bottom-fixed, chips between it and the keyboard)
 
-    /// The persistent inline field: Return prepends one task at the top,
-    /// clears the draft, and focus never leaves — the UIKit-backed field
-    /// declines the Return default resign at dispatch (day-planner 7.1),
-    /// so the keyboard never animates away no matter how slow the
-    /// store/reload round-trip is. There is no visible Add button
-    /// (day-planner 11.1): submission runs through Return or the
-    /// composer's Add accessibility action, so VoiceOver retains a
-    /// submit path. A persistent leading plus (day-planner 17.5 — the
-    /// placeholder disappears while typing, so the affordance names the
-    /// purpose with and without text; decorative, hidden from assistive
-    /// tech) opens the row, and a trailing clear button (the Track ×
-    /// grammar — small dim trailing × while editing) empties the draft
-    /// without dismissing the keyboard or losing focus; its visibility
-    /// follows the UIKit editing state mirrored from the field delegate
-    /// (ground truth), not the `composerFocused` flag (which only issues
-    /// focus requests). The composer never
-    /// unmounts and no layout jumps. The field sits in the shared
-    /// `FieldCard` chrome (secondary background against the primary
-    /// page, `minTapArea` minimum height, contrasting hairline border in
-    /// both appearances), so it reads as a card apart
-    /// from the list; the representable keeps its stable identity
-    /// inside the card, so first-responder survival is unchanged.
+    /// The persistent inline field (see `PlannerComposerRow`): Return
+    /// prepends one task at the top, clears the draft, and focus never
+    /// leaves; no visible Add button; a leading plus, a trailing clear
+    /// button, and — while editing — a keyboard-dismiss control (Return on
+    /// an empty draft dismisses too, the only submit-path resign allowed).
     private var composer: some View {
-        FieldCard {
-            HStack(spacing: Theme.spacingSmall) {
-                Image(systemName: "plus")
-                    .foregroundStyle(Theme.textSecondary)
-                    .accessibilityHidden(true)
-                PlannerComposerField(
-                    text: $vm.draft,
-                    placeholder: L10n.plannerComposerPlaceholder.text,
-                    focused: $composerFocused,
-                    accessibilityIdentifier: "PlannerComposerField",
-                    onReturn: { Task { await vm.submit() } },
-                    onEditingChanged: { composerEditing = $0 }
-                )
-                .accessibilityAction(named: Text(L10n.plannerAdd.text)) {
-                    Task { await vm.submit() }
-                }
-                if ClearButtonVisibility.shouldShow(isFocused: composerEditing, text: vm.draft) {
-                    ClearTextButton(
-                        action: {
-                            vm.draft = ""
-                            composerFocused = true
-                        },
-                        accessibilityId: "PlannerComposerClear"
-                    )
-                }
-            }
-        }
-        .padding(.horizontal, Theme.screenHorizontalPadding)
-        .padding(.vertical, Theme.spacingSmall)
+        PlannerComposerRow(
+            vm: vm,
+            focused: $composerFocused,
+            editing: $composerEditing,
+            dismissID: $composerDismissID
+        )
     }
 
     private var emptyHint: some View {
@@ -196,7 +203,13 @@ struct PlannerView: View {
             // icon + text (day-planner 11.2): trailing-side delete into
             // the durable undo buffer (never for the running linked
             // task), leading-side complete/reopen with the toggle
-            // semantics — no behavior change.
+            // semantics — no behavior change. There is no Edit button and
+            // no edit-mode deletion UI (day-planner 18.2): reordering runs
+            // through the dedicated reorder control, which only surfaces
+            // the list's `onMove` handles — no delete affordances appear in
+            // reorder mode. A disabled Start tap (a run is active) shakes
+            // the nav-bar subheader and plays the reject haptic instead of
+            // starting (day-planner 18.4).
             ForEach(Array(vm.snapshot.tasks.enumerated()), id: \.element.id) { index, task in
                 PlannerTaskRow(
                     task: task,
@@ -206,15 +219,16 @@ struct PlannerView: View {
                     onToggle: { Task { await vm.toggleComplete(task) } },
                     onEdit: { vm.beginEdit(task) },
                     onStart: {
-                        if await vm.startTask(task) { onStartActive() }
+                        if vm.startShouldReject(task) {
+                            vm.rejectDisabledStart()
+                            if !reduceMotion {
+                                subtitleShakeAttempts += 1
+                            }
+                        } else if await vm.startTask(task) {
+                            onStartActive()
+                        }
                     }
                 )
-                // The running linked task offers no delete affordance
-                // (day-planner 17.2): no trailing swipe button here, and
-                // Edit-mode delete is disabled below — the framework's row
-                // delete-disabling. The `delete(at:)` handler skips the
-                // linked id too, so a delete-all gesture leaves it behind.
-                .deleteDisabled(vm.linkedTaskID == task.id)
                 .swipeActions(edge: .trailing) {
                     if vm.linkedTaskID != task.id {
                         Button(role: .destructive) {
@@ -238,12 +252,14 @@ struct PlannerView: View {
                     .tint(Theme.accentPrimary)
                 }
             }
-            .onDelete { offsets in Task { await vm.delete(at: offsets) } }
             .onMove { source, destination in Task { await vm.move(from: source, to: destination) } }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .accessibilityIdentifier("PlannerTaskList")
+        // Reorder mode surfaces drag handles with no delete affordances:
+        // without an on-delete handler the framework shows handles only.
+        .environment(\.editMode, .constant(isReordering ? .active : .inactive))
         // The task editor sheet (day-planner 14.1/15.1, unified 16.3): the
         // manual entry form minus Start/End — Name entry, ordered
         // Categories, Notes in the same order/cards/validation/save gate.

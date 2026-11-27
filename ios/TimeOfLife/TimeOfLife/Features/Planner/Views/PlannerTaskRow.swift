@@ -13,8 +13,9 @@ import SwiftUI
 /// presence, then the actions — one combined element for the name control
 /// (EntryRow precedent at the row is split here: the row keeps three
 /// separate controls, so the merge lives on the name control).
-/// Reorder runs through the list's `onMove` (edit mode + rotor, never
-/// drag-only). A fresh row expands in at the top (see `PlannerRowInsertion`;
+/// Reorder runs through the list's `onMove` (the dedicated reorder control
+/// surfaces the handles, VoiceOver rotor included — never an Edit button,
+/// never drag-only). A fresh row expands in at the top (see `PlannerRowInsertion`;
 /// opacity-only under Reduce Motion).
 struct PlannerTaskRow: View {
     /// Maximum category chips rendered under the name (Live Activity chip
@@ -147,14 +148,19 @@ struct PlannerTaskRow: View {
             // assistive tech while preserving its exact layout footprint
             // (the `ZStack` sizes to the hidden button — the label is
             // shorter — so open, completed, and running rows share one
-            // height and no sibling moves). See `PlannerStartSlot`.
+            // height and no sibling moves). A visible Start under an active
+            // run renders dimmed (the PrimaryButton disabled-fill grammar)
+            // but stays tappable: the tap rejects with the nav-bar shake +
+            // reject haptic instead of starting (day-planner 18.4) — a
+            // truly disabled control would swallow the tap. See
+            // `PlannerStartSlot`.
             ZStack {
                 Button(L10n.timerStart.text) {
                     Task { await onStart() }
                 }
                 .buttonStyle(.bordered)
-                .disabled(timerActive || task.completedOn != nil)
-                .opacity(slot.showsButton ? 1 : 0)
+                .disabled(task.completedOn != nil)
+                .opacity(slot.showsButton ? (timerActive ? Theme.opacityDisabledFill : 1) : 0)
                 .accessibilityHidden(!slot.showsButton)
                 .accessibilityIdentifier("PlannerStart-\(task.id)")
                 if slot.showsLabel {

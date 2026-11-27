@@ -360,3 +360,6 @@
 "planner.markDone" = "标记为已完成";
 "planner.reopen" = "重新打开";
 "planner.noMatch" = "无匹配项";
+"planner.reorder" = "重新排序";
+"planner.dismissKeyboard" = "收起键盘";
+"planner.outsideRun" = "%1$@ 正在进行中";

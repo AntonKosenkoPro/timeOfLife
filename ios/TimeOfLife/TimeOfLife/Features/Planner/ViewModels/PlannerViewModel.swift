@@ -17,12 +17,15 @@ struct StagedChip: Equatable, Sendable {
     var categoryIDs: [String]
 }
 
-/// The two planner haptic moments (day-planner 17.3, HIG playing-haptics):
-/// success when a valid submit completes (an action completed), selection
-/// when a chip tap changes the staged selection.
+/// The three planner haptic moments (day-planner 17.3/18.1/18.4, HIG
+/// playing-haptics): success when a valid submit completes (an action
+/// completed), selection when a chip tap changes the staged selection,
+/// reject when a disabled control is tapped instead of acting (the error
+/// haptic is the non-motion channel — it fires even under Reduce Motion).
 enum PlannerHaptic: Equatable, Sendable {
     case success
     case selection
+    case reject
 }
 
     /// The Today projection view model (day-planner spec): an inline composer over
@@ -82,6 +85,12 @@ final class PlannerViewModel: ObservableObject {
     /// The linked task id of the active run, if any (the `In progress` row
     /// reads it; nil for ordinary runs and when idle).
     @Published private(set) var linkedTaskID: String?
+    /// The active run's entry name (day-planner 18.4): backs the Today
+    /// nav-bar `<name> is in progress now` subheader while the run is NOT
+    /// planner-linked. Nil when idle, when the draft has no name, and on
+    /// the linked path (the linked run's indicator is the row's
+    /// `In progress` label, never this).
+    @Published private(set) var runningName: String?
     /// The category catalog backing row icons, keyed by id.
     @Published private(set) var categoryByID: [String: Category] = [:]
     /// Non-field recoverable error (persistence failures).
@@ -126,6 +135,7 @@ final class PlannerViewModel: ObservableObject {
             switch event {
             case .success: Haptics.success()
             case .selection: Haptics.selection()
+            case .reject: Haptics.error()
             }
         }
         observeLinkedStop()
@@ -209,6 +219,7 @@ final class PlannerViewModel: ObservableObject {
             recents = fetchedRecents
             timerActive = draft != nil
             linkedTaskID = draft?.plannerTaskID
+            runningName = draft?.plannerTaskID == nil ? draft?.activityText : nil
             categoryByID = Dictionary(uniqueKeysWithValues: fetchedCategories.map { ($0.id, $0) })
             availableCategories = fetchedCategories
             // A submit-then-load round-trip animates only the fresh row's
@@ -251,6 +262,7 @@ final class PlannerViewModel: ObservableObject {
             recents: try await store.recents(limit: chipPoolLimit),
             timerActive: draft != nil,
             linkedTaskID: draft?.plannerTaskID,
+            runningName: draft?.plannerTaskID == nil ? draft?.activityText : nil,
             categories: try await store.categories(),
             snapshot: PlannerToday.project(tasks: tasks, on: today)
         )
@@ -269,10 +281,42 @@ final class PlannerViewModel: ObservableObject {
         recents = preloaded.recents
         timerActive = preloaded.timerActive
         linkedTaskID = preloaded.linkedTaskID
+        runningName = preloaded.runningName
         categoryByID = Dictionary(uniqueKeysWithValues: preloaded.categories.map { ($0.id, $0) })
         availableCategories = preloaded.categories
         snapshot = preloaded.snapshot
         needsReload = false
+    }
+
+    /// The Today nav-bar subtitle while a NON-planner timer runs
+    /// (day-planner 18.4): `<name> is in progress now`. Nil when idle,
+    /// when the draft carries no name, and when the run is planner-linked
+    /// (the linked run's indicator is the row's `In progress` label).
+    /// Pinned here — SwiftUI rendering is not unit-testable (the
+    /// `PlannerStartSlot` precedent).
+    var outsideRunSubtitle: String? {
+        guard timerActive, linkedTaskID == nil else { return nil }
+        guard let name = runningName, !name.isEmpty else { return nil }
+        return String(format: L10n.plannerOutsideRun.text, locale: .current, name)
+    }
+
+    /// Whether a Start tap must reject instead of starting (day-planner
+    /// 18.4): a run is active and the task is open. Completed rows never
+    /// fire (their slot stays disabled and hidden) and the running row
+    /// shows no Start at all, so the view only consults this for a visible
+    /// Start under an active run. Pinned here — same precedent.
+    func startShouldReject(_ task: PlannerTask) -> Bool {
+        timerActive && task.completedOn == nil
+    }
+
+    /// Feedback for a rejected Start tap (day-planner 18.4): plays the
+    /// reject haptic through the injected seam (test double; the generator
+    /// never fires headless). Starts nothing — the caller must not call
+    /// `startTask` on this path. The caller shakes the nav-bar subheader
+    /// (suppressed under Reduce Motion — the haptic is the non-motion
+    /// channel there).
+    func rejectDisabledStart() {
+        playHaptic(.reject)
     }
 
     /// Ordered categories for a task row (day-planner 15.4): the task's
@@ -416,6 +460,9 @@ final class PlannerViewModel: ObservableObject {
                     completedOn: PlannerCivilDate.today(),
                     operationID: await store.newRecordID()
                 )
+                // Completing a task completed an action (day-planner 18.1,
+                // HIG playing-haptics) — reopening stays silent.
+                playHaptic(.success)
             } else {
                 _ = try await store.reopenPlannerTask(
                     id: task.id,
@@ -510,6 +557,45 @@ final class PlannerViewModel: ObservableObject {
                 }
                 notifications.post(name: .plannerDraftConverged, object: nil)
             }
+            editingTask = nil
+            errorMessage = nil
+            invalidate()
+            await loadIfNeeded()
+            return true
+        } catch {
+            errorMessage = L10n.text(in: .default, code: "error.unknown")
+            return false
+        }
+    }
+
+    /// Whether the sheet edits the running linked task (day-planner 18.1):
+    /// the sheet shows the `In progress` subheader and its bottom delete
+    /// is disabled — a disabled-tap shakes the subheader and plays the
+    /// reject haptic instead of deleting. False when the sheet is closed,
+    /// when idle, and when the sheet edits any other task.
+    var isEditingRunningTask: Bool {
+        guard let editing = editingTask else { return false }
+        guard let linked = linkedTaskID else { return false }
+        return editing.id == linked
+    }
+
+    /// Deletes the sheet's task into the durable undo buffer and closes the
+    /// sheet (day-planner 18.1) — the normal path: the row vanishes with no
+    /// outbox row yet, restorable through the system Undo confirmation
+    /// (`delete(at:)` precedent). Reloads the snapshot on success. Returns
+    /// whether the sheet closed. When the sheet edits the running task the
+    /// delete is disabled: plays the reject haptic through the injected
+    /// seam, deletes nothing, and returns false with the sheet open — the
+    /// caller shakes the subheader instead (suppressed under Reduce
+    /// Motion; the haptic is the non-motion channel there).
+    func attemptDeleteEditingTask() async -> Bool {
+        guard let editing = editingTask else { return false }
+        guard !isEditingRunningTask else {
+            playHaptic(.reject)
+            return false
+        }
+        do {
+            _ = try await store.deletePlannerTaskUndoable(id: editing.id)
             editingTask = nil
             errorMessage = nil
             invalidate()

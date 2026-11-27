@@ -7,8 +7,12 @@ import SwiftUI
 /// same validation, same save gate). Categories and notes are optional
 /// (zero tags and empty notes allowed, tag order preserved); identical
 /// names stay separate identities. Tapping a planner row is the only entry
-/// point. A save failure surfaces as a non-field error with the draft
-/// intact and the sheet open.
+/// point. Editing the running task shows the `In progress` subheader; the
+/// bottom delete is disabled for the running task (a disabled-tap shakes
+/// the subheader and plays the reject haptic instead of deleting) and
+/// deletes into the durable undo buffer otherwise (day-planner 18.1). A
+/// save failure surfaces as a non-field error with the draft intact and
+/// the sheet open.
 struct PlannerTaskEditorSheet: View {
     @ObservedObject var vm: PlannerViewModel
     @EnvironmentObject var container: AppContainer
@@ -18,6 +22,13 @@ struct PlannerTaskEditorSheet: View {
     /// sheet's internal stack, so no sheet ever stacks over this sheet
     /// (Log Time CREATE-sheet precedent).
     @State private var isShowingCategoryEditor = false
+    /// Disabled-delete shake attempts (day-planner 18.1): tapping the
+    /// running task's disabled delete shakes the `In progress` subheader
+    /// (NotesEditorPage overcount grammar — suppressed under Reduce Motion,
+    /// the reject haptic still fires).
+    @State private var shakeAttempts = 0
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
 
     var body: some View {
         NavigationStack {
@@ -26,6 +37,7 @@ struct PlannerTaskEditorSheet: View {
                     nameCard
                     categoriesCard
                     notesCard
+                    deleteSection
                     if vm.errorMessage != nil {
                         errorSection
                     }
@@ -38,9 +50,36 @@ struct PlannerTaskEditorSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text(L10n.plannerEditorTitle.text)
-                        .font(.headline)
-                        .lineLimit(1)
+                    VStack(spacing: 0) {
+                        Text(L10n.plannerEditorTitle.text)
+                            .font(.headline)
+                            .lineLimit(1)
+                        // The running task's subheader (day-planner 18.1):
+                        // the `In progress` row-label grammar, reused so no
+                        // new string is needed.
+                        if vm.isEditingRunningTask {
+                            Text(L10n.plannerInProgress.text)
+                                .font(.footnote)
+                                .foregroundStyle(Theme.accentPrimary)
+                                .lineLimit(1)
+                        }
+                    }
+                    // Disabled-delete feedback shakes THIS stack (the
+                    // NotesEditorPage counter-stack precedent: a horizontal
+                    // keyframe track keyed on the failed attempt counter).
+                    .keyframeAnimator(initialValue: CGFloat.zero, trigger: shakeAttempts) { content, value in
+                        content.offset(x: value)
+                    } keyframes: { _ in
+                        KeyframeTrack {
+                            CubicKeyframe(12, duration: 0.06)
+                            CubicKeyframe(-9, duration: 0.06)
+                            CubicKeyframe(6, duration: 0.06)
+                            CubicKeyframe(-3, duration: 0.06)
+                            CubicKeyframe(0, duration: 0.06)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("PlannerEditorSubheader")
                 }
                 // Calendar grammar (fix-50-nav-buttons): X cancels, the
                 // checkmark saves through the validity gate.
@@ -178,5 +217,31 @@ struct PlannerTaskEditorSheet: View {
                 )
             }
         }
+    }
+
+    /// Bottom delete (day-planner 18.1): the normal path deletes into the
+    /// durable undo buffer and pops the sheet (restorable through the
+    /// system Undo confirmation). For the running task delete is disabled:
+    /// the button renders dimmed (the PrimaryButton disabled-fill grammar)
+    /// but stays tappable — a truly disabled control would swallow the
+    /// tap — and the tap shakes the `In progress` subheader and plays the
+    /// reject haptic instead of deleting (NotesEditorPage overcount
+    /// grammar). The swipe-delete label is reused — no new string.
+    private var deleteSection: some View {
+        Button(role: .destructive) {
+            Task {
+                if await vm.attemptDeleteEditingTask() {
+                    dismiss()
+                } else if !reduceMotion {
+                    shakeAttempts += 1
+                }
+            }
+        } label: {
+            Label(L10n.entryDeleteConfirm.text, systemImage: "trash")
+                .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+        }
+        .buttonStyle(.bordered)
+        .opacity(vm.isEditingRunningTask ? Theme.opacityDisabledFill : 1)
+        .accessibilityIdentifier("PlannerEditorDeleteButton")
     }
 }

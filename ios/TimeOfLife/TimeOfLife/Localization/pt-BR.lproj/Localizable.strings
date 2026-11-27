@@ -360,3 +360,6 @@
 "planner.markDone" = "Marcar como concluída";
 "planner.reopen" = "Reabrir";
 "planner.noMatch" = "Sem correspondências";
+"planner.reorder" = "Reordenar";
+"planner.dismissKeyboard" = "Ocultar teclado";
+"planner.outsideRun" = "%1$@ está em andamento agora";

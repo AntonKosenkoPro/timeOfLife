@@ -17,7 +17,9 @@ Planner rows never feed History, Insights, or Recents.
    composer's Add accessibility action — there is no visible Add
    button): one task prepends before the existing Today rows, the draft
    clears, and the field keeps focus with the keyboard open for the next
-   task. A matching Recent tap fills the exact text for editing or
+   task. While editing, a trailing dismiss control offers explicit
+   keyboard dismissal without submitting; Return on an empty draft
+   dismisses too — the only submit-path resign allowed. A matching Recent tap fills the exact text for editing or
    submission and stages that Recent's full category set for the created
    task — no task is created, no timer starts (the tap plays the
    selection haptic); the line then shows only the selected chip in the
@@ -28,16 +30,21 @@ Planner rows never feed History, Insights, or Recents.
    clears the draft (and any staged set) without losing the keyboard.
 4. The user toggles a task done (it stays in position through its
    completion day), taps an open task to edit it in the sheet (name plus
-   ordered categories plus notes — the manual entry form minus Start/End),
-   drags it to a new position in edit mode (VoiceOver rotor included),
-   or swipes a Mail-style delete/complete pill (shake-to-undo restores
+   ordered categories plus notes — the manual entry form minus Start/End;
+   editing the running task shows the `In progress` subheader), reorders
+   through the dedicated reorder control (no Edit button, no edit-mode
+   deletion UI — drag handles plus the VoiceOver rotor), deletes the
+   sheet's task at the bottom of the sheet (disabled for the running task:
+   the tap shakes the subheader and plays the reject haptic instead), or
+   swipes a Mail-style delete/complete pill (shake-to-undo restores
    deletes via the system Undo confirmation). Completed taps are a no-op
-   and the running task offers no delete. Rows show their ordered
+   and the running task offers no row delete affordance. Rows show their ordered
    categories as small icon+name chips under the name and a notes
    indicator trailing the chips (VoiceOver announces name, then
    categories, then notes); the running task reads the accent-colored
-   `In progress` label instead of Start — no timer-running subtitle
-   anywhere.
+   `In progress` label instead of Start; a non-planner run names itself
+   in the Today nav-bar subheader (`<name> is in progress now`) instead
+   — no other timer-running subtitle exists.
 5. The user taps Start on an open task when no timer is active: a task
    holding categories starts with exactly those; a task without
    categories falls back to the ordinary exact-text Recents inheritance.
@@ -62,8 +69,11 @@ Planner rows never feed History, Insights, or Recents.
 Top-to-bottom order:
 
 1. Navigation title: `L10n.plannerTitle` (`My Day`), `.inline` display
-   mode. No timer-running subtitle anywhere — the running task's
-   accent-colored `In progress` row label is the indicator.
+   mode, with a conditional nav-bar subheader: while a NON-planner timer
+   runs, the bar reads `<name> is in progress now`
+   (`L10n.plannerOutsideRun`) naming the running entry. A planner-linked
+   run shows no subtitle — its indicator stays the accent-colored
+   `In progress` row label.
 2. Checklist `List(.plain)` (`accessibilityIdentifier`: `PlannerTaskList`):
    open and completed-Today rows in the shared order, no section header.
    Empty projection shows the empty hint (`L10n.plannerEmptyHint`) instead.
@@ -78,7 +88,11 @@ Top-to-bottom order:
    (`L10n.plannerAdd`) keeps the VoiceOver submit path. A trailing clear
    button (the Track × grammar — small dim trailing × while editing,
    `accessibilityIdentifier`: `PlannerComposerClear`) empties the draft
-   without dismissing the keyboard or losing focus.
+   without dismissing the keyboard or losing focus. While editing, a
+   trailing dismiss control (`keyboard.chevron.compact.down`,
+   `L10n.plannerDismissKeyboard`, `PlannerComposerDismiss`) resigns
+   without submitting; Return on an empty draft dismisses too — the
+   only submit-path resign allowed.
    `accessibilityIdentifier`s: `PlannerComposerField`.
    Return submits without ever resigning first responder (no
    dismiss/reopen cycle of any duration); the composer never unmounts, so
@@ -132,13 +146,19 @@ actions, announced through the name control's combined label.
   the same Notes presenter pushing the shared `NotesEditorPage` with
   copy-on-open X/✓ semantics; same order, same validation, same save
   gate). Completed taps are a no-op — a completed task is edited only
-  after reopening. The sheet saves the name, the set, and the notes as independent
-  field intents, so a name-only edit sends no categories and a notes-only
-  edit sends no name; the 2000-trimmed-rune notes bound gates Save like
-  the Log Time form.
+  after reopening. Editing the running task shows the `In progress`
+  subheader under the title (`PlannerEditorSubheader`). The sheet saves
+  the name, the set, and the notes as independent field intents, so a
+  name-only edit sends no categories and a notes-only edit sends no name;
+  the 2000-trimmed-rune notes bound gates Save like the Log Time form. A
+  bottom delete (`trash`, `L10n.entryDeleteConfirm`,
+  `PlannerEditorDeleteButton`) removes the sheet's task into the durable
+  undo buffer and pops the sheet — except for the running task, whose
+  delete renders dimmed but stays tappable: the tap shakes the subheader
+  and plays the reject haptic instead of deleting.
   (`PlannerName-<id>`; sheet: `PlannerEditorNameRow`,
   `PlannerEditorCategories`, `PlannerEditorNotesRow`,
-  `PlannerEditorSaveButton`). The name control's VoiceOver label folds
+  `PlannerEditorDeleteButton`, `PlannerEditorSaveButton`). The name control's VoiceOver label folds
   in the ordered category names and the notes presence
   (`L10n.historyHasNotes`); chips and the indicator are decorative.
 - Categories/notes affordances: the task's ordered set as small icon+name
@@ -154,23 +174,30 @@ actions, announced through the name control's combined label.
   completed rows. While the task carries the active linked run the slot
   shows the localized `In progress` label in the accent color
   (`L10n.plannerInProgress`, `PlannerInProgress-<id>`) instead — same
-  footprint, no Start button.
+  footprint, no Start button. A visible Start under an active run renders
+  dimmed but stays tappable: the tap shakes the nav-bar subheader and plays
+  the reject haptic instead of starting (a truly disabled control would
+  swallow the tap).
 - Swipes (Mail-style icon+text pills): trailing-side Delete
   (`L10n.entryDeleteConfirm`, `trash`, danger tint, full-swipe deletes)
   into the durable undo buffer (no outbox row yet) — never for the
-  running task (no trailing swipe button, Edit-mode delete disabled via
-  `deleteDisabled`, handler skips the linked id); leading-side
+  running task (no trailing swipe button, handler skips the linked id);
+  leading-side
   complete/reopen (`L10n.plannerMarkDone` / `L10n.plannerReopen`,
   `checkmark` / `arrow.uturn.backward`, accent tint) with the toggle
-  semantics — position kept, timers and entries untouched. Edit-mode
-  delete/reorder (`onDelete` / `onMove`) and shake-to-undo are unchanged:
-  shake restores through the DEFAULT system Undo confirmation
-  (entry/category precedent, `L10n.entryDeleteConfirm` action name).
-- Reorder: the list's `onMove` in visible coordinates (EditButton in the
-  trailing toolbar; VoiceOver rotor reorder, never drag-only). Moves
-  allocate a key between the new visible neighbors — no other row is
-  rewritten — and respect Reduce Motion (no explicit animations anywhere
-  on this page).
+  semantics — position kept, timers and entries untouched. There is
+  no Edit button and no edit-mode deletion UI anywhere on this page.
+  Shake-to-undo is unchanged: shake restores through the DEFAULT system
+  Undo confirmation (entry/category precedent,
+  `L10n.entryDeleteConfirm` action name).
+- Reorder: the list's `onMove` in visible coordinates through the dedicated
+  reorder control (`L10n.plannerReorder`, `arrow.up.arrow.down` while idle
+  and `checkmark` while active, `PlannerReorderButton`) — no delete
+  affordances appear in reorder mode (the list carries no `.onDelete`, so
+  only drag handles surface). The VoiceOver rotor reorder path is included,
+  never drag-only. Moves allocate a key between the new visible neighbors
+  — no other row is rewritten — and respect Reduce Motion (no
+  explicit animations anywhere on this page).
 
 ### Progress control
 
@@ -223,9 +250,10 @@ construction). `accessibilityIdentifier`: `PlannerProgressControl`.
 - [x] Rows show ordered category chips under the name with the notes
   indicator trailing them (VoiceOver announces name, then categories,
   then notes) and read the accent-colored localized `In progress` label
-  over the preserved Start slot while the task carries the run — no
-  timer-running nav subtitle; open, completed, and running rows share one
-  exact height (Reduce Motion respected).
+  over the preserved Start slot while the task carries the run; a
+  non-planner run names itself in the nav-bar subheader instead — no
+  other timer-running subtitle exists. Open, completed, and running rows
+  share one exact height (Reduce Motion respected).
 - [x] A linked Stop invalidates the planner projection, so the Track
   counts refresh in place; ordinary Stop posts nothing and is unchanged.
 - [x] The progress icon follows completion (`checklist.unchecked` /
@@ -242,11 +270,27 @@ construction). `accessibilityIdentifier`: `PlannerProgressControl`.
   presentation (Track Recents parity: accent fill, on-accent content,
   `.isSelected` trait), pinned via `isSelectedChip`.
 - [x] Completed taps never open the editor (`beginEdit` no-op); the
-  running linked task offers no delete affordance (no trailing swipe
-  button, Edit-mode `deleteDisabled`, handler skips the linked id).
+  running linked task offers no row delete affordance (no trailing swipe
+  button, handler skips the linked id), and there is no Edit button and no
+  edit-mode deletion UI anywhere — reordering runs through the
+  dedicated reorder control (`PlannerReorderButton`) with `onMove` handles
+  only.
 - [x] Valid submits play the success haptic and chip taps the selection
   haptic through the injected `playHaptic` seam (test double; generators
   never fire headless).
 - [x] The page title is `My Day` (all five locales + `L10n`); the composer
   carries a persistent leading plus with the contrasting `FieldCard`
   hairline border in both appearances.
+- [x] The editor sheet shows the `In progress` subheader for the running
+  task and offers bottom delete — disabled for the running task with a
+  subheader-shake + reject haptic on tap, durable undo otherwise (pinned
+  via `isEditingRunningTask` / `attemptDeleteEditingTask`).
+- [x] The composer row offers an editing-only keyboard-dismiss control and
+  Return on an empty draft dismisses (the only submit-path resign
+  allowed); valid submits never resign (pinned via
+  `shouldResignOnReturn`).
+- [x] The Today nav bar shows `<name> is in progress now`
+  (`L10n.plannerOutsideRun`, five locales + `L10n`) while a non-planner
+  timer runs; tapping a disabled Start shakes the subheader and plays the
+  reject haptic instead of starting (pinned via `outsideRunSubtitle` /
+  `startShouldReject` / `rejectDisabledStart`).

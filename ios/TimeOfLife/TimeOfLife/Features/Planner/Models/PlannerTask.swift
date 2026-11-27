@@ -307,6 +307,11 @@ enum PlannerToday {
         /// The linked task id of the persisted draft, if any (the `In
         /// progress` row reads it on first paint).
         var linkedTaskID: String?
+        /// The persisted draft's entry name when it is NOT planner-linked
+        /// (day-planner 18.4): backs the `<name> is in progress now`
+        /// nav-bar subheader on first paint. Nil when idle, nameless, or
+        /// planner-linked.
+        var runningName: String?
         /// The category catalog backing row icons (resolved on first paint).
         var categories: [Category]
         /// The projected Today snapshot Track paints.

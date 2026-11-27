@@ -362,3 +362,6 @@
 "planner.markDone" = "Mark done";
 "planner.reopen" = "Reopen";
 "planner.noMatch" = "No matches";
+"planner.reorder" = "Reorder";
+"planner.dismissKeyboard" = "Dismiss keyboard";
+"planner.outsideRun" = "%1$@ is in progress now";

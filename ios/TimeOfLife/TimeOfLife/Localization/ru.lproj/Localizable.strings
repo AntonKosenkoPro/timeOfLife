@@ -362,3 +362,6 @@
 "planner.markDone" = "Отметить выполненной";
 "planner.reopen" = "Вернуть";
 "planner.noMatch" = "Нет совпадений";
+"planner.reorder" = "Изменить порядок";
+"planner.dismissKeyboard" = "Скрыть клавиатуру";
+"planner.outsideRun" = "%1$@ выполняется сейчас";
