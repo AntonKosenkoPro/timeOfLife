@@ -138,28 +138,31 @@ struct PlannerTaskRow: View {
                                     .accessibilityHidden(true)
                             }
                         }
-                        // Blocked-Start error (day-planner 19.1): the short
-                        // red message for a Start tapped while a run is
-                        // active — wrapping lines, never a one-line
-                        // truncation, shaking on every rejected tap.
-                        if let blockedError {
-                            Text(blockedError)
-                                .font(.footnote)
-                                .foregroundStyle(Theme.danger)
-                                .multilineTextAlignment(.leading)
-                                .keyframeAnimator(initialValue: CGFloat.zero, trigger: shakeAttempts) { content, value in
-                                    content.offset(x: value)
-                                } keyframes: { _ in
-                                    KeyframeTrack {
-                                        CubicKeyframe(12, duration: 0.06)
-                                        CubicKeyframe(-9, duration: 0.06)
-                                        CubicKeyframe(6, duration: 0.06)
-                                        CubicKeyframe(-3, duration: 0.06)
-                                        CubicKeyframe(0, duration: 0.06)
-                                    }
+                    }
+                    // Blocked-Start error (day-planner 19.1, ungated 20.1):
+                    // the short red message for a Start tapped while a run
+                    // is active — wrapping lines, never a one-line
+                    // truncation, shaking on every rejected tap. It renders
+                    // for every row, including a bare task with no
+                    // categories or notes (nested inside the chips gate it
+                    // never mounted there — owner report 2026-11-27).
+                    if let blockedError {
+                        Text(blockedError)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.danger)
+                            .multilineTextAlignment(.leading)
+                            .keyframeAnimator(initialValue: CGFloat.zero, trigger: shakeAttempts) { content, value in
+                                content.offset(x: value)
+                            } keyframes: { _ in
+                                KeyframeTrack {
+                                    CubicKeyframe(12, duration: 0.06)
+                                    CubicKeyframe(-9, duration: 0.06)
+                                    CubicKeyframe(6, duration: 0.06)
+                                    CubicKeyframe(-3, duration: 0.06)
+                                    CubicKeyframe(0, duration: 0.06)
                                 }
-                                .accessibilityIdentifier("PlannerBlockedStartError")
-                        }
+                            }
+                            .accessibilityIdentifier("PlannerBlockedStartError")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
