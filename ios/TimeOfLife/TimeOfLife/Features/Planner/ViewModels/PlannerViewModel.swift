@@ -5,6 +5,18 @@ import Foundation
 import Combine
 import SwiftUI
 
+/// One chip tap's staged write (day-planner 16.2): the tapped Recent's exact
+/// text plus its full ordered category set. The line shows only this chip
+/// while the composer still reads its text; the next submit creates the
+/// task with the set.
+struct StagedChip: Equatable, Sendable {
+    /// The tapped Recent's exact text (selected-only display while the
+    /// draft still reads it).
+    var text: String
+    /// The tapped Recent's full ordered category set (submit-carry).
+    var categoryIDs: [String]
+}
+
     /// The Today projection view model (day-planner spec): an inline composer over
 /// a reorderable checklist projected from one ordered backlog, with a task
 /// editor sheet for renaming and tagging. Today is the
@@ -22,8 +34,22 @@ final class PlannerViewModel: ObservableObject {
     /// The current Today projection. Empty until the first load settles.
     @Published private(set) var snapshot = PlannerToday.Snapshot(tasks: [], done: 0, total: 0)
     /// The inline composer draft. Survives reloads; cleared only by a
-    /// successful submission.
-    @Published var draft = ""
+    /// successful submission. Clearing the draft also clears any staged
+    /// chip set (day-planner 16.2).
+    @Published var draft = "" {
+        didSet {
+            if draft.isEmpty {
+                stagedChip = nil
+            }
+        }
+    }
+    /// The chip-tapped Recent whose line and set are staged (day-planner
+    /// 16.2): the tapped exact text (the chips line shows only this chip
+    /// while the draft still reads it) plus the Recent's full ordered
+    /// category set (carried by the next submit). Staged by tap; cleared by
+    /// draft clear or another tap; typing neither stages nor clears — the
+    /// line filters again but the set survives until clear or retap.
+    @Published private(set) var stagedChip: StagedChip?
     /// The task open in the editor sheet, or nil when the sheet is closed.
     @Published var editingTask: PlannerTask?
     /// The editor sheet's name draft, prefilled from the task.
@@ -36,6 +62,12 @@ final class PlannerViewModel: ObservableObject {
     @Published var sheetNotes = ""
     /// The category catalog backing the sheet's TagSelector.
     @Published var availableCategories: [Category] = []
+    /// Every committed entry text for the sheet's shared name picker
+    /// (manual-entry parity, day-planner 16.3): newest-first, uncapped —
+    /// the picker suggests everything ever used, like the Log Time form.
+    /// Settable so tests can seed names directly instead of driving them
+    /// through async store paths (LogTimeViewModel.nameRecents precedent).
+    @Published var sheetNameRecents: [ExactName] = []
     /// Whether a timer run is active (planner stays usable, but no task
     /// can start another run while one is active).
     @Published private(set) var timerActive = false
@@ -78,6 +110,7 @@ final class PlannerViewModel: ObservableObject {
         self.timer = timer
         self.notifications = notifications
         observeLinkedStop()
+        observeTaskConvergence()
     }
 
     // MARK: - Loading (serialized, Track precedent)
@@ -109,6 +142,12 @@ final class PlannerViewModel: ObservableObject {
     /// notification path is unit-testable (History precedent).
     private var linkedStopCancellables = Set<AnyCancellable>()
 
+    /// Event-driven reload for Track-side convergence (day-planner 16.4):
+    /// a Track retag or notes save converged the linked task behind this
+    /// view model, so the posted event invalidates the stale projection and
+    /// the guarded load republishes the converged set with no navigation.
+    private var taskConvergedCancellables = Set<AnyCancellable>()
+
     private func observeLinkedStop() {
         notifications.publisher(for: .plannerLinkedStopCommitted)
             .sink { [weak self] _ in
@@ -118,6 +157,23 @@ final class PlannerViewModel: ObservableObject {
                 }
             }
             .store(in: &linkedStopCancellables)
+    }
+
+    /// Subscribes the task-converged reload (day-planner 16.4): the
+    /// Track-side retag/notes path converged the linked task behind this
+    /// view model, so the posted event invalidates the stale projection and
+    /// the guarded load republishes the converged task in place.
+    /// Subscribed here — not in the view — so the path is unit-testable
+    /// (linked-stop precedent).
+    private func observeTaskConvergence() {
+        notifications.publisher(for: .plannerTaskConverged)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.invalidate()
+                    await self?.loadIfNeeded()
+                }
+            }
+            .store(in: &taskConvergedCancellables)
     }
 
     /// The unguarded worker: one snapshot query batch whose results publish
@@ -222,7 +278,14 @@ final class PlannerViewModel: ObservableObject {
     /// Matching chips for the current draft, newest-first: the full capped
     /// strip for an empty draft, case-insensitive prefix matches over exact
     /// entry texts while typing. Tapping a chip only fills the composer.
+    /// After a tap the line shows ONLY the selected chip while the draft
+    /// still reads its exact text (day-planner 16.2); typing anything else
+    /// filters again — the staged set survives, only the display narrows.
     var chips: [RecentEntry] {
+        if let staged = stagedChip, draft == staged.text,
+           let selected = recents.first(where: { $0.id == staged.text }) {
+            return [selected]
+        }
         let trimmed = ActivityName.normalized(draft)
         guard !trimmed.isEmpty else { return Array(recents.prefix(Self.chipDisplayCap)) }
         let lowered = trimmed.lowercased()
@@ -232,9 +295,22 @@ final class PlannerViewModel: ObservableObject {
     }
 
     /// Fills the composer with a chip's exact text for editing or
-    /// submission. Creates no task, starts no timer.
+    /// submission and stages the Recent's full ordered category set for the
+    /// created task (day-planner 16.2). Creates no task, starts no timer.
+    /// Replaces any previously staged set; the set survives typing and
+    /// clears only when the draft clears or another chip is tapped.
     func fillFromChip(_ recent: RecentEntry) {
         draft = recent.activityText
+        stagedChip = StagedChip(text: recent.activityText, categoryIDs: recent.categoryIDs)
+    }
+
+    /// Validated SF Symbol for a chip's leading icon (day-planner 16.2):
+    /// the Recent's first category's symbol, or nil when the Recent carries
+    /// none or the id left the catalog — the chip then renders text-only
+    /// (the pre-16.2 capsule, unchanged).
+    func chipIconSymbol(for recent: RecentEntry) -> String? {
+        guard let first = recent.categoryIDs.first, let category = categoryByID[first] else { return nil }
+        return CatalogIcon(validated: category.icon).displaySymbol
     }
 
     /// Whether the chips line shows the no-match placeholder (day-planner
@@ -247,13 +323,17 @@ final class PlannerViewModel: ObservableObject {
 
     /// Submits the composer (Return or the accessible Add affordance):
     /// prepends one task before the existing Today rows, clears the draft,
-    /// and reloads. The field never resigns across this round-trip: the
-    /// UIKit-backed composer suppresses the Return default resign at
-    /// dispatch, so no refocusing is needed afterwards. An invalid or failed
-    /// submission prepends nothing and keeps the draft.
+    /// and reloads. The task carries the chip-staged category set when a
+    /// chip tap staged one (day-planner 16.2), or no categories otherwise
+    /// (the sheet tags them afterwards; Start falls back to Recents). The
+    /// field never resigns across this round-trip: the UIKit-backed composer
+    /// suppresses the Return default resign at dispatch, so no refocusing is
+    /// needed afterwards. An invalid or failed submission prepends nothing
+    /// and keeps the draft (and any staged set).
     func submit() async {
         let trimmed = ActivityName.normalized(draft)
         guard case .valid = ActivityName.validate(trimmed) else { return }
+        let staged = stagedChip?.categoryIDs ?? []
         let visible = snapshot.tasks
         let first = visible.first?.positionKey
         guard let key = PlannerPositionKey.allocate(before: nil, after: first) else {
@@ -266,7 +346,8 @@ final class PlannerViewModel: ObservableObject {
                 id: id,
                 name: trimmed,
                 positionKey: key,
-                operationID: await store.newRecordID()
+                operationID: await store.newRecordID(),
+                categoryIDs: staged
             )
             guard case .saved = outcome else {
                 errorMessage = L10n.text(in: .default, code: "error.unknown")
@@ -401,6 +482,41 @@ final class PlannerViewModel: ObservableObject {
     func loadSheetCategoriesIfNeeded() async {
         guard availableCategories.isEmpty else { return }
         availableCategories = (try? await store.categories()) ?? []
+    }
+
+    /// Loads every committed entry text for the sheet's shared name picker
+    /// (idempotent; LogTimeViewModel.loadNameRecentsIfNeeded parity,
+    /// day-planner 16.3). A failure leaves suggestions empty — it never
+    /// blocks the sheet. Called on sheet open by the view alongside the
+    /// catalog load.
+    func loadSheetNameRecentsIfNeeded() async {
+        guard sheetNameRecents.isEmpty else { return }
+        sheetNameRecents = (try? await store.allActivityNames().map(ExactName.init(storeRecent:))) ?? []
+    }
+
+    /// Fills the sheet name draft from a picker suggestion (the Recents tap
+    /// contract, LogTimeViewModel.applySuggestion parity): exact text plus
+    /// that entry's full ordered categories. Draft-only — no committed
+    /// entry is touched and validation/save behavior is unchanged.
+    func applySheetSuggestion(text: String, categoryIDs: [String]) {
+        sheetName = text
+        sheetCategoryIDs = categoryIDs
+    }
+
+    /// Completes the sheet picker with typed text (LogTimeViewModel
+    /// parity): an exact-recent match inherits that entry's ordered
+    /// categories (the Recents-tap contract); any other non-empty text keeps
+    /// the caller's current categories (e.g. chosen in the TagSelector).
+    /// Empty input is a no-op — Back remains the exit. Draft-only, like
+    /// `applySheetSuggestion`.
+    func completeSheetTypedName(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if let match = sheetNameRecents.first(where: { $0.text == trimmed }) {
+            applySheetSuggestion(text: match.text, categoryIDs: match.categoryIDs)
+        } else {
+            sheetName = trimmed
+        }
     }
 
     /// Toggles a category on the sheet's ordered selection (TagSelector

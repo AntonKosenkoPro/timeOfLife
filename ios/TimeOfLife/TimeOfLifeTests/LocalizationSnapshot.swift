@@ -160,7 +160,6 @@ enum LocalizationSnapshot {
         "planner.progressLabel",
         "planner.reopen",
         "planner.save",
-        "planner.timerActive",
         "planner.title",
         "profile.account",
         "profile.categories",

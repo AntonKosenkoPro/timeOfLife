@@ -158,6 +158,119 @@ struct PlannerTaskSheetTests {
         #expect(vm.rowCategories(for: task).isEmpty)
     }
 
+    // MARK: - Shared Name entry (16.3, manual-entry parity)
+
+    /// The sheet uses the shared Name entry card: an empty name disables
+    /// Save (the manual form's empty-name gate), saving stays shut, and the
+    /// sheet keeps the draft open for correction.
+    @Test("empty sheet name disables Save with the draft intact")
+    func emptySheetNameDisablesSave() async throws {
+        let (vm, store, _) = await makeContext()
+        await vm.loadIfNeeded()
+        vm.draft = "A"
+        await vm.submit()
+        let task = try #require(vm.snapshot.tasks.first)
+        vm.beginEdit(task)
+        vm.sheetName = "   "
+        #expect(vm.isSheetSaveEnabled == false)
+        #expect(await vm.saveSheet() == false)
+        #expect(vm.editingTask != nil)
+        #expect(try await store.plannerTask(id: task.id)?.name == "A")
+    }
+
+    /// Sheet prefill mirrors the manual EDIT form: opening the sheet shows
+    /// the task's name, ordered categories, and notes.
+    @Test("the sheet prefills name, categories, and notes from the task")
+    func sheetPrefillsFromTask() async throws {
+        let (vm, _, _) = await makeContext(categories: [("c1", "Work"), ("c2", "Gym")])
+        await vm.loadIfNeeded()
+        vm.draft = "A"
+        await vm.submit()
+        var task = try #require(vm.snapshot.tasks.first)
+        vm.beginEdit(task)
+        vm.sheetName = "Zed"
+        vm.sheetCategoryIDs = ["c2", "c1"]
+        vm.sheetNotes = "chapter 3"
+        #expect(await vm.saveSheet())
+        task = try #require(vm.snapshot.tasks.first)
+        vm.beginEdit(task)
+        #expect(vm.sheetName == "Zed")
+        #expect(vm.sheetCategoryIDs == ["c2", "c1"])
+        #expect(vm.sheetNotes == "chapter 3")
+    }
+
+    /// Cancel matches the manual form (Back from the picker / X on the
+    /// sheet): nothing writes, and reopening shows the stored values, not
+    /// the abandoned typing.
+    @Test("cancel discards the sheet drafts without writing")
+    func cancelDiscardsSheetDrafts() async throws {
+        let (vm, store, _) = await makeContext(categories: [("c1", "Work")])
+        await vm.loadIfNeeded()
+        vm.draft = "A"
+        await vm.submit()
+        let task = try #require(vm.snapshot.tasks.first)
+        let outboxBefore = try await store.outboxRowCount()
+        vm.beginEdit(task)
+        vm.sheetName = "Zed"
+        vm.sheetCategoryIDs = ["c1"]
+        vm.sheetNotes = "abandoned"
+        vm.cancelEdit()
+        #expect(vm.editingTask == nil)
+        #expect(try await store.plannerTask(id: task.id)?.name == "A")
+        #expect(try await store.outboxRowCount() == outboxBefore)
+        vm.beginEdit(try #require(try await store.plannerTask(id: task.id)))
+        #expect(vm.sheetName == "A")
+        #expect(vm.sheetCategoryIDs.isEmpty)
+        #expect(vm.sheetNotes.isEmpty)
+    }
+
+    /// A picker suggestion fills the exact text plus the entry's ordered
+    /// categories (the Recents-tap contract, LogTimeViewModel parity).
+    @Test("a suggestion fills the exact text plus its categories")
+    func suggestionFillsTextAndCategories() async throws {
+        let (vm, _, _) = await makeContext()
+        vm.sheetNameRecents = [ExactName(text: "Gym", categoryIDs: ["c1", "c2"])]
+        vm.sheetCategoryIDs = ["c9"]
+        vm.applySheetSuggestion(text: "Gym", categoryIDs: ["c1", "c2"])
+        #expect(vm.sheetName == "Gym")
+        #expect(vm.sheetCategoryIDs == ["c1", "c2"])
+    }
+
+    /// Typed completion resolves like the manual form: an exact-recent
+    /// match inherits that entry's ordered categories; any other non-empty
+    /// text keeps the caller's set; empty input is a no-op (Back exits).
+    @Test("typed completion inherits exact matches and keeps the rest")
+    func typedCompletionResolvesLikeTheManualForm() async throws {
+        let (vm, _, _) = await makeContext()
+        vm.sheetNameRecents = [ExactName(text: "Gym", categoryIDs: ["c1"])]
+        vm.sheetCategoryIDs = ["c2"]
+        vm.completeSheetTypedName("Gym")
+        #expect(vm.sheetName == "Gym")
+        #expect(vm.sheetCategoryIDs == ["c1"])
+        vm.completeSheetTypedName("  Yoga  ")
+        #expect(vm.sheetName == "Yoga")
+        #expect(vm.sheetCategoryIDs == ["c1"])
+        vm.completeSheetTypedName("   ")
+        #expect(vm.sheetName == "Yoga")
+    }
+
+    /// The picker recents load once from committed entry texts (the manual
+    /// form's full-name source, not the capped chips pool); a failure
+    /// leaves suggestions empty, never blocking the sheet.
+    @Test("sheet name recents load from committed entry texts")
+    func sheetNameRecentsLoadFromEntries() async throws {
+        let (vm, store, _) = await makeContext()
+        _ = try await store.createEntry(TimeEntry(
+            id: "e1", activityText: "Gym",
+            startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
+            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600
+        ))
+        await vm.loadSheetNameRecentsIfNeeded()
+        #expect(vm.sheetNameRecents.map(\.text) == ["Gym"])
+        await vm.loadSheetNameRecentsIfNeeded()
+        #expect(vm.sheetNameRecents.map(\.text) == ["Gym"])
+    }
+
     // MARK: - Helpers
 
     private func makeContext(

@@ -86,9 +86,17 @@ final class TimerService: ObservableObject {
     /// `retag` outbox row (day-planner 15.2, Track→task direction). The
     /// locked text, notes, and `started_at` are untouched; no draft-sync
     /// row is queued. The Live Activity chips re-mirror from the new set
-    /// (mid-run retag refreshes chips in place).
+    /// (mid-run retag refreshes chips in place). A linked run posts the
+    /// task-converged event so the planner snapshot refreshes in place
+    /// (day-planner 16.4); unlinked runs converge no task and post nothing.
     func retagRunningDraft(_ categoryIDs: [String]) async throws {
+        let linked = try await store.timerDraft()?.plannerTaskID != nil
         try await store.updateRunningDraftCategories(categoryIDs, operationID: await store.newRecordID())
+        // Posted before the re-mirror (which needs a start anchor the
+        // store write never requires): the task already converged above.
+        if linked {
+            notifications.post(name: .plannerTaskConverged, object: nil)
+        }
         guard let draft = try await store.timerDraft(), let startedAt = draft.startedAt else { return }
         await liveActivities.runStarted(
             text: draft.activityText,
@@ -102,9 +110,15 @@ final class TimerService: ObservableObject {
     /// mid-run notes save) and — when the run is linked to a planner task —
     /// the task's notes in the same chokepoint transaction with the single
     /// `notes` outbox row (day-planner 15.2, Track→task direction). The
-    /// locked text, categories, and `started_at` are untouched.
+    /// locked text, categories, and `started_at` are untouched. A linked
+    /// run posts the task-converged event so the planner snapshot refreshes
+    /// in place (day-planner 16.4); unlinked runs post nothing.
     func updateTimerDraftNotes(_ notes: String) async throws {
+        let linked = try await store.timerDraft()?.plannerTaskID != nil
         try await store.updateRunningDraftNotes(notes, operationID: await store.newRecordID())
+        if linked {
+            notifications.post(name: .plannerTaskConverged, object: nil)
+        }
     }
 
     /// Rewrites only the persisted draft's start time (a mid-run backdate)

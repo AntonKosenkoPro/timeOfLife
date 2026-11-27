@@ -34,20 +34,12 @@ struct PlannerView: View {
         content
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // Mail-style section subtitle (day-planner 11.1): the
-                // running-timer notice lives under the Today title in the
-                // nav bar — never as an inline caption in the list.
+                // The running timer's only indicator is the accent `In
+                // progress` label on its row (day-planner 16.1) — no nav-bar
+                // subtitle, no inline caption.
                 ToolbarItem(placement: .principal) {
-                    VStack(spacing: 0) {
-                        Text(L10n.plannerTitle.text)
-                            .font(.headline)
-                        if vm.timerActive {
-                            Text(L10n.plannerTimerActive.text)
-                                .font(.caption)
-                                .foregroundStyle(Theme.textSecondary)
-                                .accessibilityIdentifier("PlannerTimerSubtitle")
-                        }
-                    }
+                    Text(L10n.plannerTitle.text)
+                        .font(.headline)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     EditButton()
@@ -235,29 +227,33 @@ struct PlannerView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .accessibilityIdentifier("PlannerTaskList")
-        // The task editor sheet (day-planner 14.1/15.1): Name + ordered
-        // Categories + Notes in Log Time sheet grammar. Tapping a row is
-        // the only entry point — the row itself never renames inline.
+        // The task editor sheet (day-planner 14.1/15.1, unified 16.3): the
+        // manual entry form minus Start/End — Name entry, ordered
+        // Categories, Notes in the same order/cards/validation/save gate.
+        // Tapping a row is the only entry point — the row itself never
+        // renames inline.
         .sheet(item: $vm.editingTask) { _ in
             PlannerTaskEditorSheet(vm: vm)
         }
     }
 
-    /// The chips line (day-planner 9.1, gap 10.2, placeholder 11.3): one
-    /// horizontally scrollable row of recent-activity chips pinned between
-    /// the composer and the keyboard — the last VStack slot, so the
-    /// keyboard's safe-area inset lands under it with a `spacingSmall`
-    /// breathing gap, and the chips never sit flush on the keyboard.
-    /// Visible only while the keyboard is open; an empty draft shows the
-    /// full capped strip, typing prefix-filters it, and tapping a chip
-    /// fills the composer with its exact text (no task created, no timer
-    /// started). A draft that matches nothing shows the localized
-    /// no-match placeholder instead of an empty strip. The slot stays
-    /// mounted at one chip row while the keyboard is open even when the
-    /// filter matches nothing (the placeholder — or a hidden prototype
-    /// for a blank filter — holds the row height), so filter changes
-    /// only swap chips inside the line and never move the composer or
-    /// the list above.
+    /// The chips line (day-planner 9.1, gap 10.2, placeholder 11.3, icons
+    /// + staging 16.2): one horizontally scrollable row of recent-activity
+    /// chips pinned between the composer and the keyboard — the last VStack
+    /// slot, so the keyboard's safe-area inset lands under it with a
+    /// `spacingSmall` breathing gap, and the chips never sit flush on the
+    /// keyboard. Visible only while the keyboard is open; an empty draft
+    /// shows the full capped strip, typing prefix-filters it, and tapping a
+    /// chip fills the composer with its exact text (no task created, no
+    /// timer started) while staging the Recent's full category set for the
+    /// next submit — the line then shows only the selected chip until
+    /// typing resumes. Each chip shows its Recent's first category icon. A
+    /// draft that matches nothing shows the localized no-match placeholder
+    /// instead of an empty strip. The slot stays mounted at one chip row
+    /// while the keyboard is open even when the filter matches nothing (the
+    /// placeholder — or a hidden prototype for a blank filter — holds the
+    /// row height), so filter changes only swap chips inside the line and
+    /// never move the composer or the list above.
     ///
     /// VoiceOver follows the visual order — list, then the composer, then
     /// the chips line next to the keyboard — so swipe order always matches
@@ -309,24 +305,35 @@ struct PlannerView: View {
         }
     }
 
-    /// One chip: tapping fills the composer with the exact text.
+    /// One chip: the Recent's first category icon plus its exact text
+    /// (day-planner 16.2; text-only when the Recent carries no resolvable
+    /// first category). Tapping fills the composer with the exact text and
+    /// stages the Recent's full set for the created task.
     private func chip(_ recent: RecentEntry) -> some View {
         Button {
             vm.fillFromChip(recent)
             composerFocused = true
         } label: {
-            Text(recent.activityText)
-                .font(.subheadline)
-                .lineLimit(1)
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.horizontal, Theme.spacingMedium)
-                .padding(.vertical, 12)
-                .frame(minHeight: Theme.minTapArea)
-                .background(Theme.backgroundSecondary)
-                .clipShape(Capsule())
-                .overlay {
-                    Capsule().stroke(Theme.hairline, lineWidth: 0.7)
+            HStack(spacing: Theme.spacingExtraSmall) {
+                if let symbol = vm.chipIconSymbol(for: recent) {
+                    Image(systemName: symbol)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                        .accessibilityHidden(true)
                 }
+                Text(recent.activityText)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            .padding(.horizontal, Theme.spacingMedium)
+            .padding(.vertical, 12)
+            .frame(minHeight: Theme.minTapArea)
+            .background(Theme.backgroundSecondary)
+            .clipShape(Capsule())
+            .overlay {
+                Capsule().stroke(Theme.hairline, lineWidth: 0.7)
+            }
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("PlannerChip-\(recent.activityText)")

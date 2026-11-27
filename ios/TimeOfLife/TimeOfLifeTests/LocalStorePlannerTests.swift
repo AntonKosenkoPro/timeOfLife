@@ -177,6 +177,46 @@ struct LocalStorePlannerTests {
         #expect(retags.allSatisfy { $0.name == nil && $0.positionKey == nil && $0.completedOn == nil })
     }
 
+    @Test("Create carries the staged initial set with one row")
+    func createCarriesInitialSet() async throws {
+        let store = try makeStore()
+        // Staged creates (day-planner 16.2) dedupe and store the initial
+        // set; the single create row carries it — still one outbox row, no
+        // follow-up retag.
+        let before = try await store.outboxRowCount()
+        let result = try await store.createPlannerTask(
+            id: UUID().uuidString, name: "Read", positionKey: "500000",
+            operationID: UUID().uuidString, categoryIDs: ["c2", "c1", "c2"]
+        )
+        guard case let .saved(task) = result else {
+            Issue.record("create failed: \(result)"); return
+        }
+        #expect(task.categoryIDs == ["c2", "c1"])
+        #expect(try await store.plannerTask(id: task.id)?.categoryIDs == ["c2", "c1"])
+        #expect(try await store.outboxRowCount() == before + 1)
+        let payloads = try (try await store.outboxRows()).compactMap { $0.payload?.data(using: .utf8) }.map {
+            try JSONDecoder().decode(PlannerOperationPayload.self, from: $0)
+        }
+        let creates = payloads.filter { $0.intent == PlannerIntent.create.rawValue }
+        #expect(creates.count == 1)
+        #expect(creates[0].categoryIDs == ["c2", "c1"])
+        // Untapped submits keep the pre-16.2 shape: no categories stored,
+        // no set on the wire.
+        let bare = try await store.createPlannerTask(
+            id: UUID().uuidString, name: "Bare", positionKey: "500001",
+            operationID: UUID().uuidString
+        )
+        guard case let .saved(bareTask) = bare else {
+            Issue.record("create failed: \(bare)"); return
+        }
+        #expect(bareTask.categoryIDs.isEmpty)
+        let bareCreates = try (try await store.outboxRows()).compactMap { $0.payload?.data(using: .utf8) }.map {
+            try JSONDecoder().decode(PlannerOperationPayload.self, from: $0)
+        }.filter { $0.intent == PlannerIntent.create.rawValue && $0.taskID == bareTask.id }
+        #expect(bareCreates.count == 1)
+        #expect(bareCreates[0].categoryIDs == nil)
+    }
+
     @Test("Unchanged writes enqueue nothing")
     func unchangedWritesAreQuiet() async throws {
         let store = try makeStore()

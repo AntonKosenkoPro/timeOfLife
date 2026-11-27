@@ -8,12 +8,13 @@ import XCTest
 /// breathing gap above it; empty draft shows the full capped strip,
 /// typing prefix-filters it, a draft matching nothing shows the
 /// localized no-match placeholder instead of an empty strip, tapping a
-/// chip fills the composer without creating a task or starting a timer),
-/// no section header over the task rows, a bottom-fixed composer
-/// (contrasting card, no visible Add button — Return or the composer's
-/// Add accessibility action submits — plus a Track-grammar clear button
-/// that empties the draft without dismissing the keyboard), the
-/// running-timer notice as a nav-bar subtitle under the Today title, and
+/// chip fills the composer and stages its categories without creating a
+/// task or starting a timer), no section header over the task rows, a
+/// bottom-fixed composer (contrasting card, no visible Add button —
+/// Return or the composer's Add accessibility action submits — plus a
+/// Track-grammar clear button that empties the draft without dismissing
+/// the keyboard), the running row reading the accent `In progress` label
+/// (no nav-bar subtitle — the label is the indicator), and
 /// every submit prepending at the top with an expanding insertion. Drives the REAL return-key path in a real
 /// scene (unit hosts cannot dispatch `onSubmit`), then tight-polls
 /// software keyboard presence: any sample without a keyboard fails. A

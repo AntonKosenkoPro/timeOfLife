@@ -354,4 +354,12 @@ extension Notification.Name {
     /// in-memory snapshot (tags, notes editor baseline) with no
     /// navigation. Unlinked saves post nothing.
     static let plannerDraftConverged = Notification.Name("plannerDraftConverged")
+
+    /// Posted (in-process) after a Track-side retag or notes save converges
+    /// its linked planner task in the same chokepoint transaction
+    /// (day-planner 16.4): the task's ordered set or notes changed behind
+    /// the planner view model, so the planner observes this and reloads,
+    /// refreshing its snapshot in place with no navigation. Unlinked runs
+    /// converge no task and post nothing.
+    static let plannerTaskConverged = Notification.Name("plannerTaskConverged")
 }

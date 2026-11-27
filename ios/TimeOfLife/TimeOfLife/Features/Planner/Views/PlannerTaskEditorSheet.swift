@@ -1,17 +1,14 @@
 import SwiftUI
 
-/// The task editor sheet (day-planner 14.1/15.1): edits one planner task's
-/// name, ordered category set, and notes in Log Time sheet grammar — the
-/// same field order (Name, then Categories, then Notes), the same card
-/// chrome (`FormCard`), the same validity gate (Save disabled until the
-/// trimmed name satisfies the shared timer-name rule and the notes satisfy
-/// the shared 2000-trimmed-rune bound), the same inline category creation,
-/// and the same presenter-plus-pushed-`NotesEditorPage` for notes — reduced
-/// to those three fields. Categories and notes are optional (zero tags and
-/// empty notes allowed, tag order preserved); identical names stay separate
-/// identities. Tapping a planner row is the only entry point. A save
-/// failure surfaces as a non-field error with the draft intact and the
-/// sheet open.
+/// The task editor sheet (day-planner 14.1/15.1/16.3): edits one planner
+/// task's name, ordered category set, and notes — the manual entry form
+/// with the Start and End cards omitted (same shared Name entry card into
+/// `NamePicker`, same Categories card, same Notes presenter, same order,
+/// same validation, same save gate). Categories and notes are optional
+/// (zero tags and empty notes allowed, tag order preserved); identical
+/// names stay separate identities. Tapping a planner row is the only entry
+/// point. A save failure surfaces as a non-field error with the draft
+/// intact and the sheet open.
 struct PlannerTaskEditorSheet: View {
     @ObservedObject var vm: PlannerViewModel
     @EnvironmentObject var container: AppContainer
@@ -21,13 +18,6 @@ struct PlannerTaskEditorSheet: View {
     /// sheet's internal stack, so no sheet ever stacks over this sheet
     /// (Log Time CREATE-sheet precedent).
     @State private var isShowingCategoryEditor = false
-    /// The text field holding focus, if any (tap-away/scroll-away resigns it).
-    @FocusState private var focusedField: SheetField?
-
-    /// The sheet's focusable field (tap-away/scroll-away dismissal target).
-    private enum SheetField {
-        case name
-    }
 
     var body: some View {
         NavigationStack {
@@ -72,6 +62,7 @@ struct PlannerTaskEditorSheet: View {
             }
             .task {
                 await vm.loadSheetCategoriesIfNeeded()
+                await vm.loadSheetNameRecentsIfNeeded()
             }
             .navigationDestination(isPresented: $isShowingCategoryEditor) {
                 CategoryEditorForm(
@@ -87,30 +78,36 @@ struct PlannerTaskEditorSheet: View {
         }
     }
 
-    /// The Name card (Log Time name-card grammar: caption over the value):
-    /// an inline field bound to the sheet draft, prefilled from the task.
+    /// The Name card (day-planner 16.3): the shared `EntryNameCard` — the
+    /// same push row into `NamePicker` the Log Time form uses (same
+    /// behavior, same chrome, one component never a copy). The picker's
+    /// completion writes the sheet drafts (`applySheetSuggestion` fills the
+    /// exact text plus the entry's ordered categories;
+    /// `completeSheetTypedName` resolves typed text the same way); Back
+    /// discards the picker typing (copy-on-open, manual-form cancel
+    /// semantics).
     private var nameCard: some View {
-        FormCard(accessibilityID: "PlannerEditorNameRow", resignFocus: focusedField = nil) {
-            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-                Text(L10n.entryNameLabel.text)
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                TextField(L10n.entryNamePlaceholder.text, text: $vm.sheetName)
-                    .focused($focusedField, equals: .name)
-                    .font(.body)
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, minHeight: Theme.minTapArea, alignment: .leading)
-                    .accessibilityLabel(L10n.entryNameLabel.text)
-                    .accessibilityIdentifier("PlannerEditorNameField")
-            }
-        }
+        EntryNameCard(
+            value: vm.sheetName,
+            placeholder: L10n.entryNamePlaceholder.text,
+            recents: vm.sheetNameRecents,
+            categories: Dictionary(uniqueKeysWithValues: vm.availableCategories.map { ($0.id, $0) }),
+            emptyHint: L10n.timerRecentsEmptyHint.text,
+            accessibilityID: "PlannerEditorNameRow",
+            onCompleteSuggestion: {
+                vm.applySheetSuggestion(text: $0.text, categoryIDs: $0.categoryIDs)
+            },
+            onCompleteText: { vm.completeSheetTypedName($0) }
+        )
     }
 
     /// The Categories card (Log Time categories-card grammar): the shared
     /// ordered `TagSelector` with the inline-creation chip, at natural
-    /// height inside the outer form scroll (no internal scrolling).
+    /// height inside the outer form scroll (no internal scrolling). The
+    /// tap-away resign is a no-op: the sheet holds no inline field (Name
+    /// entry lives on the pushed picker page, like the Log Time form).
     private var categoriesCard: some View {
-        FormCard(accessibilityID: "PlannerEditorCategoriesRow", resignFocus: focusedField = nil) {
+        FormCard(accessibilityID: "PlannerEditorCategoriesRow", resignFocus: ()) {
             VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
                 Text(L10n.entryCategoriesLabel.text)
                     .font(.caption)
@@ -121,10 +118,6 @@ struct PlannerTaskEditorSheet: View {
                     selected: vm.sheetCategoryIDs,
                     onToggle: {
                         vm.toggleSheetCategory($0)
-                        // The plain card tap-away stays silent on chip taps
-                        // (consumed), so toggles resign explicitly here
-                        // (Log Time categories-card grammar).
-                        focusedField = nil
                     },
                     onCreate: { isShowingCategoryEditor = true },
                     accessibilityId: "PlannerEditorCategories",

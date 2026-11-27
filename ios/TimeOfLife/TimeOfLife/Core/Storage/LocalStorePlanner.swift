@@ -10,10 +10,9 @@ import GRDB
 /// single-chokepoint rule — and planner rows never feed History, Insights,
 /// or Recents.
 extension LocalStore {
-    /// The outbox/undo resource string for planner tasks. Kept distinct
-    /// from the entry/category/tombstone namespaces: planner deletions
-    /// never touch `/deletions` and entry/category resurrection is
-    /// unaffected.
+    /// The outbox/undo resource string for planner tasks. Distinct from the
+    /// entry/category/tombstone namespaces: planner deletions never touch
+    /// `/deletions` and entry/category resurrection is unaffected.
     static let plannerResource = "planner_task"
 
     /// The outcome of a planner write.
@@ -104,18 +103,19 @@ extension LocalStore {
         }
     }
 
-    /// Creates a planner task (appended at `positionKey`, allocated by the
-    /// caller between its neighbors) plus its outbox create row in one
-    /// transaction. Names follow the shared timer-name rule; identical
-    /// names are separate identities. New tasks carry no categories and no
-    /// notes — the editor sheet tags and annotates them afterwards through
-    /// the retag and notes intents.
+    /// Creates a planner task plus its outbox create row in one transaction
+    /// (day-planner 16.2: the task carries the given initial category set —
+    /// empty by default, so untapped submits are unchanged; a non-empty set
+    /// rides the create row, which the relay reads as optional
+    /// `category_ids`, so no wire change). Names follow the shared
+    /// timer-name rule; identical names stay separate identities.
     /// Returns `.invalid` without writing when the name is empty or too long.
     func createPlannerTask(
         id: String,
         name: String,
         positionKey: String,
         operationID: String,
+        categoryIDs: [String] = [],
         now: Date = Date()
     ) throws -> PlannerMutation {
         let trimmed = ActivityName.normalized(name)
@@ -130,6 +130,7 @@ extension LocalStore {
         return try queue.write { db in
             let task = PlannerTask(
                 id: id, name: trimmed, positionKey: positionKey,
+                categoryIDs: Self.deduplicate(categoryIDs),
                 createdAt: stamped, updatedAt: stamped
             )
             do {
@@ -147,7 +148,8 @@ extension LocalStore {
                                    op: "create", payload: PlannerOperationPayload(
                                        operationID: operationID,
                                        taskID: task.id, intent: PlannerIntent.create.rawValue,
-                                       name: task.name, positionKey: task.positionKey
+                                       name: task.name, positionKey: task.positionKey,
+                                       categoryIDs: task.categoryIDs.isEmpty ? nil : task.categoryIDs
                                    ))
             return .saved(task)
         }

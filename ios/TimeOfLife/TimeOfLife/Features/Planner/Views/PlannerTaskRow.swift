@@ -1,18 +1,26 @@
 import SwiftUI
 
-/// One planner row: completion toggle, task name (tapping opens the task
-/// editor sheet), and the Start affordance slot (always mounted — see
-/// `PlannerStartSlot`). While the task carries the active linked run the
-/// slot shows the localized `In progress` label over the preserved slot
-/// footprint instead of the Start button. Completed rows stay in position
-/// through their completion day. Task categories render as ordered icons
-/// and non-empty notes as an indicator, both inline after the name; both
-/// stay inside the single-line layout, so no state changes the row height.
-/// VoiceOver reads the name plus its category names and notes presence.
+/// One planner row: completion toggle, task name with its ordered category
+/// chips under it (small icon+name chips in Live Activity chip grammar, cap
+/// 2 + `+n` overflow) and a notes indicator trailing the chips, and the
+/// Start affordance slot (always mounted — see `PlannerStartSlot`). While
+/// the task carries the active linked run the slot shows the localized `In
+/// progress` label in the accent color over the preserved slot footprint
+/// instead of the Start button. Completed rows stay in position through
+/// their completion day. Toggling completion changes neither the chips nor
+/// the slot, so the row keeps its exact height and no sibling moves.
+/// VoiceOver reads the name, then its ordered category names, then notes
+/// presence, then the actions — one combined element for the name control
+/// (EntryRow precedent at the row is split here: the row keeps three
+/// separate controls, so the merge lives on the name control).
 /// Reorder runs through the list's `onMove` (edit mode + rotor, never
 /// drag-only). A fresh row expands in at the top (see `PlannerRowInsertion`;
 /// opacity-only under Reduce Motion).
 struct PlannerTaskRow: View {
+    /// Maximum category chips rendered under the name (Live Activity chip
+    /// grammar: cap 2 + `+n` overflow — the row never grows with the set).
+    static let maxVisibleCategoryChips = 2
+
     let task: PlannerTask
     /// Ordered categories resolved by the view model (icons render in
     /// task order; unknown ids already dropped).
@@ -34,8 +42,16 @@ struct PlannerTaskRow: View {
         !task.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// VoiceOver label for the name control: the task name plus its ordered
-    /// category names and the notes presence (the icons and the indicator
+    /// The chips slice for a row's ordered set: the visible prefix plus the
+    /// hidden overflow count (Live Activity cap grammar — the row shows at
+    /// most `maxVisibleCategoryChips` chips and a `+n` overflow label).
+    static func chipSlice(for categories: [Category]) -> (shown: [Category], overflow: Int) {
+        let shown = Array(categories.prefix(maxVisibleCategoryChips))
+        return (shown, max(0, categories.count - shown.count))
+    }
+
+    /// VoiceOver label for the name control: the task name, then its ordered
+    /// category names, then the notes presence (the chips and the indicator
     /// are decorative). EntryRow.accessibilityLabel precedent.
     static func accessibilityLabel(task: PlannerTask, categories: [Category]) -> String {
         var parts = [task.name]
@@ -50,6 +66,12 @@ struct PlannerTaskRow: View {
         PlannerStartSlot.slot(for: task, isRunning: isRunning)
     }
 
+    /// The visible chips slice for this row's ordered set (computed once
+    /// per body pass).
+    private var slice: (shown: [Category], overflow: Int) {
+        Self.chipSlice(for: categories)
+    }
+
     var body: some View {
         HStack(spacing: Theme.spacingSmall) {
             Button(action: onToggle) {
@@ -62,21 +84,49 @@ struct PlannerTaskRow: View {
             .accessibilityIdentifier("PlannerToggle-\(task.id)")
 
             Button(action: onEdit) {
-                HStack(spacing: Theme.spacingExtraSmall) {
+                VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
                     Text(task.name)
                         .foregroundStyle(task.completedOn == nil ? Theme.textPrimary : Theme.textSecondary)
                         .strikethrough(task.completedOn != nil)
-                    ForEach(categories) { category in
-                        Image(systemName: CatalogIcon(validated: category.icon).displaySymbol)
-                            .font(.caption)
-                            .foregroundStyle(Theme.textSecondary)
-                            .accessibilityHidden(true)
-                    }
-                    if Self.hasNotes(task) {
-                        Image(systemName: "note.text")
-                            .font(.caption)
-                            .foregroundStyle(Theme.accentPrimary)
-                            .accessibilityHidden(true)
+                    // The ordered set as small icon+name chips (Live Activity
+                    // chip grammar, `chipSlice` cap); the notes indicator
+                    // trails them, so the visual order is name → chips →
+                    // indicator — the same order VoiceOver announces. The
+                    // slice depends only on the set (never on completion or
+                    // the run), so toggling keeps the row's exact height.
+                    if !slice.shown.isEmpty || Self.hasNotes(task) {
+                        HStack(spacing: 4) {
+                            ForEach(slice.shown) { category in
+                                HStack(spacing: 2) {
+                                    Image(systemName: CatalogIcon(validated: category.icon).displaySymbol)
+                                        .font(.caption2)
+                                    Text(category.name)
+                                        .font(.caption)
+                                        .lineLimit(1)
+                                }
+                                .foregroundStyle(Theme.textSecondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Theme.backgroundSecondary)
+                                .clipShape(Capsule())
+                                .overlay {
+                                    Capsule().stroke(Theme.hairline, lineWidth: 0.5)
+                                }
+                                .accessibilityHidden(true)
+                            }
+                            if slice.overflow > 0 {
+                                Text("+\(slice.overflow)")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .accessibilityHidden(true)
+                            }
+                            if Self.hasNotes(task) {
+                                Image(systemName: "note.text")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.accentPrimary)
+                                    .accessibilityHidden(true)
+                            }
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -110,7 +160,7 @@ struct PlannerTaskRow: View {
                 if slot.showsLabel {
                     Text(L10n.plannerInProgress.text)
                         .font(.subheadline)
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(Theme.accentPrimary)
                         .accessibilityIdentifier("PlannerInProgress-\(task.id)")
                 }
             }

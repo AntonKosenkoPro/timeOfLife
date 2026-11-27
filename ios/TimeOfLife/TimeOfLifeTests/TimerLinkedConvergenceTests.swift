@@ -177,6 +177,147 @@ struct TimerLinkedConvergenceTests {
         #expect(trackVM.state.startedAt == running)
     }
 
+    // MARK: - In-place freshness (day-planner 16.4)
+
+    /// Track retag reaches the loaded planner snapshot with no navigation
+    /// and no test-side planner reload: the Track-side convergence posts
+    /// and the planner view model refreshes in place.
+    @Test("Track retag refreshes the loaded planner snapshot in place")
+    func trackRetagRefreshesPlannerInPlace() async throws {
+        let center = NotificationCenter()
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        _ = try? await store.createCategory(Category(id: "c1", name: "Work", icon: CatalogIcon.tag.rawValue))
+        let service = TimerService(store: store, liveActivities: FakeLiveActivities(), notifications: center)
+        _ = try await store.createPlannerTask(
+            id: "task-1", name: "Read", positionKey: "500000",
+            operationID: UUID().uuidString
+        )
+        _ = try await service.startLinkedTask(
+            name: "Read", categoryIDs: [], notes: "", taskID: "task-1", startedAt: Date()
+        )
+        let trackVM = TrackViewModel(
+            service: service,
+            connectivity: MockConnectivity(connected: true),
+            notifications: center
+        )
+        await trackVM.loadIfNeeded()
+        guard case .running = trackVM.state else {
+            Issue.record("Track is not running after the linked Start")
+            return
+        }
+        let plannerVM = PlannerViewModel(
+            store: store,
+            undoBuffer: UndoBufferStore(store: store),
+            timer: service,
+            notifications: center
+        )
+        // Both snapshots loaded: the planner sees the bare task.
+        await plannerVM.loadIfNeeded()
+        #expect(plannerVM.snapshot.tasks.first?.categoryIDs.isEmpty == true)
+
+        // The Track UI path (fire-and-forget persist inside, like the
+        // owner's repro): no test-side planner reload follows.
+        trackVM.toggleDraftCategory("c1")
+
+        let deadline = Date().addingTimeInterval(3)
+        while plannerVM.snapshot.tasks.first?.categoryIDs != ["c1"], Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        #expect(plannerVM.snapshot.tasks.first?.categoryIDs == ["c1"])
+    }
+
+    /// Track notes edit reaches the loaded planner snapshot with no
+    /// navigation and no test-side planner reload (same event as retag).
+    @Test("Track notes edit refreshes the loaded planner snapshot in place")
+    func trackNotesEditRefreshesPlannerInPlace() async throws {
+        let center = NotificationCenter()
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        let service = TimerService(store: store, liveActivities: FakeLiveActivities(), notifications: center)
+        _ = try await store.createPlannerTask(
+            id: "task-1", name: "Read", positionKey: "500000",
+            operationID: UUID().uuidString
+        )
+        _ = try await service.startLinkedTask(
+            name: "Read", categoryIDs: [], notes: "", taskID: "task-1", startedAt: Date()
+        )
+        let trackVM = TrackViewModel(
+            service: service,
+            connectivity: MockConnectivity(connected: true),
+            notifications: center
+        )
+        await trackVM.loadIfNeeded()
+        guard case .running = trackVM.state else {
+            Issue.record("Track is not running after the linked Start")
+            return
+        }
+        let plannerVM = PlannerViewModel(
+            store: store,
+            undoBuffer: UndoBufferStore(store: store),
+            timer: service,
+            notifications: center
+        )
+        await plannerVM.loadIfNeeded()
+        #expect(plannerVM.snapshot.tasks.first?.notes.isEmpty == true)
+
+        await trackVM.updateDraftNotes("live note")
+
+        let deadline = Date().addingTimeInterval(3)
+        while plannerVM.snapshot.tasks.first?.notes != "live note", Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        #expect(plannerVM.snapshot.tasks.first?.notes == "live note")
+    }
+
+    /// Sheet retag on the running task reloads the loaded Track snapshot
+    /// in place (the category direction complements the notes-only
+    /// `sheetSaveReloadsTrackInPlace` pin above).
+    @Test("sheet retag on the running task reloads Track in place")
+    func sheetRetagReloadsTrackInPlace() async throws {
+        let center = NotificationCenter()
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        _ = try? await store.createCategory(Category(id: "c1", name: "Work", icon: CatalogIcon.tag.rawValue))
+        let service = TimerService(store: store, liveActivities: FakeLiveActivities(), notifications: center)
+        _ = try await store.createPlannerTask(
+            id: "task-1", name: "Read", positionKey: "500000",
+            operationID: UUID().uuidString
+        )
+        _ = try await service.startLinkedTask(
+            name: "Read", categoryIDs: [], notes: "", taskID: "task-1", startedAt: Date()
+        )
+        let trackVM = TrackViewModel(
+            service: service,
+            connectivity: MockConnectivity(connected: true),
+            notifications: center
+        )
+        await trackVM.loadIfNeeded()
+        guard case .running = trackVM.state else {
+            Issue.record("Track is not running after the linked Start")
+            return
+        }
+        #expect(trackVM.state.draft?.categoryIDs.isEmpty == true)
+
+        let plannerVM = PlannerViewModel(
+            store: store,
+            undoBuffer: UndoBufferStore(store: store),
+            timer: service,
+            notifications: center
+        )
+        await plannerVM.loadIfNeeded()
+        plannerVM.beginEdit(try #require(try await store.plannerTask(id: "task-1")))
+        plannerVM.sheetCategoryIDs = ["c1"]
+        #expect(await plannerVM.saveSheet())
+
+        // No test-side Track reload: the convergence event drives it.
+        let deadline = Date().addingTimeInterval(3)
+        while trackVM.state.draft?.categoryIDs != ["c1"], Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        #expect(trackVM.state.draft?.categoryIDs == ["c1"])
+    }
+
     // MARK: - Helpers
 
     private func makeService() -> TimerService {
