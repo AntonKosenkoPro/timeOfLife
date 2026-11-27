@@ -354,6 +354,7 @@
 "planner.title" = "Today";
 "planner.progressLabel" = "Done %1$d of %2$d";
 "planner.emptyHint" = "Tasks you add show up here until done.";
+"planner.inProgress" = "In progress";
 "planner.composerPlaceholder" = "Add a task";
 "planner.add" = "Add";
 "planner.editorTitle" = "Edit task";

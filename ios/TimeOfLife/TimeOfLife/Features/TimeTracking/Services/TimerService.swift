@@ -59,13 +59,14 @@ final class TimerService: ObservableObject {
     /// already active, pending, or awaiting a Stop retry — a second Start
     /// never replaces anything at the mutation boundary. The caller stays
     /// usable (no navigation, no error banner) on false; only a real
-    /// persistence failure throws.
-    func startLinkedTask(name: String, categoryIDs: [String], taskID: String, startedAt: Date) async throws -> Bool {
+    /// persistence failure throws. The task's name, ordered categories, and
+    /// notes are copied into the draft (day-planner §15).
+    func startLinkedTask(name: String, categoryIDs: [String], notes: String, taskID: String, startedAt: Date) async throws -> Bool {
         let claimed = try await store.claimTimerDraft(
             activityText: name,
             categoryIDs: categoryIDs,
             startedAt: startedAt,
-            notes: "",
+            notes: notes,
             plannerTaskID: taskID
         )
         guard claimed else { return false }
@@ -79,11 +80,31 @@ final class TimerService: ObservableObject {
         return true
     }
 
+    /// Rewrites the running draft's live category snapshot (a mid-run
+    /// retag) and — when the run is linked to a planner task — the task's
+    /// ordered set in the same chokepoint transaction with the single
+    /// `retag` outbox row (day-planner 15.2, Track→task direction). The
+    /// locked text, notes, and `started_at` are untouched; no draft-sync
+    /// row is queued. The Live Activity chips re-mirror from the new set
+    /// (mid-run retag refreshes chips in place).
+    func retagRunningDraft(_ categoryIDs: [String]) async throws {
+        try await store.updateRunningDraftCategories(categoryIDs, operationID: await store.newRecordID())
+        guard let draft = try await store.timerDraft(), let startedAt = draft.startedAt else { return }
+        await liveActivities.runStarted(
+            text: draft.activityText,
+            iconSymbol: firstIconSymbol(for: draft.categoryIDs),
+            startedAt: startedAt,
+            categoryChips: categoryChips(for: draft.categoryIDs)
+        )
+    }
+
     /// Rewrites only the persisted running draft's live notes snapshot (a
-    /// mid-run notes save). The locked text, categories, and `started_at`
-    /// are untouched.
+    /// mid-run notes save) and — when the run is linked to a planner task —
+    /// the task's notes in the same chokepoint transaction with the single
+    /// `notes` outbox row (day-planner 15.2, Track→task direction). The
+    /// locked text, categories, and `started_at` are untouched.
     func updateTimerDraftNotes(_ notes: String) async throws {
-        try await store.updateTimerDraftNotes(notes)
+        try await store.updateRunningDraftNotes(notes, operationID: await store.newRecordID())
     }
 
     /// Rewrites only the persisted draft's start time (a mid-run backdate)

@@ -131,14 +131,16 @@ struct TimerServiceTests {
         )
         let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
         let claimed = try await service.startLinkedTask(
-            name: "Read", categoryIDs: [], taskID: "task-1", startedAt: startedAt
+            name: "Read", categoryIDs: [], notes: "chapter 3", taskID: "task-1", startedAt: startedAt
         )
         #expect(claimed)
         let draft = try #require(try await store.timerDraft())
         #expect(draft.plannerTaskID == "task-1")
+        // Start copies the task notes into the draft (day-planner §15).
+        #expect(draft.notes == "chapter 3")
         // A second linked Start never replaces the active run.
         let second = try await service.startLinkedTask(
-            name: "Other", categoryIDs: [], taskID: "task-2", startedAt: startedAt
+            name: "Other", categoryIDs: [], notes: "", taskID: "task-2", startedAt: startedAt
         )
         #expect(!second)
         let kept = try #require(try await store.timerDraft())
@@ -156,7 +158,7 @@ struct TimerServiceTests {
         )
         let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
         _ = try await service.startLinkedTask(
-            name: "Read", categoryIDs: [], taskID: "task-1", startedAt: startedAt
+            name: "Read", categoryIDs: [], notes: "", taskID: "task-1", startedAt: startedAt
         )
         // A mid-run retag (ordinary replace path) keeps the link.
         try await service.startTimerDraft(text: "Read", categoryIDs: [], startedAt: startedAt)
@@ -174,7 +176,7 @@ struct TimerServiceTests {
         )
         let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
         _ = try await service.startLinkedTask(
-            name: "Read", categoryIDs: [], taskID: "task-1", startedAt: startedAt
+            name: "Read", categoryIDs: [], notes: "", taskID: "task-1", startedAt: startedAt
         )
         let receipt = try await service.stopTimerDraft(
             text: "Read",
@@ -208,7 +210,7 @@ struct TimerServiceTests {
         )
         let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
         _ = try await service.startLinkedTask(
-            name: "Read", categoryIDs: [], taskID: "task-1", startedAt: startedAt
+            name: "Read", categoryIDs: [], notes: "", taskID: "task-1", startedAt: startedAt
         )
         let receipt = try await service.stopTimerDraft(
             text: "Read",
@@ -241,7 +243,7 @@ struct TimerServiceTests {
         )
         let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
         _ = try await service.startLinkedTask(
-            name: "Read", categoryIDs: [], taskID: "task-1", startedAt: startedAt
+            name: "Read", categoryIDs: [], notes: "", taskID: "task-1", startedAt: startedAt
         )
         _ = try await store.deletePlannerTaskUndoable(id: "task-1")
         let outboxBefore = try await store.outboxRowCount()
@@ -267,7 +269,7 @@ struct TimerServiceTests {
         )
         let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
         _ = try await service.startLinkedTask(
-            name: "Read", categoryIDs: [], taskID: "task-1", startedAt: startedAt
+            name: "Read", categoryIDs: [], notes: "", taskID: "task-1", startedAt: startedAt
         )
         // The task is renamed mid-run: Stop keeps the draft's locked name
         // for the entry and completes the task by id without reverting it.

@@ -1422,12 +1422,12 @@ final class SyncController: ObservableObject {
 
     /// Re-posts a live local planner task as a create (new operation id)
     /// after a `not_found` on a field operation the relay never saw. The
-    /// live row's full state — name, position, and ordered categories —
-    /// travels so the relay converges without losing the set pending in a
-    /// still-queued retag. A locally-missing task drops its row (nothing
-    /// left to push). A create that races into a `planner_conflict` adopts
-    /// the relay version instead; anything else rethrows loudly with the
-    /// row still queued.
+    /// live row's full state — name, position, ordered categories, and notes —
+    /// travels so the relay converges without losing the set or the text
+    /// pending in still-queued retag/notes rows. A locally-missing task
+    /// drops its row (nothing left to push). A create that races into a
+    /// `planner_conflict` adopts the relay version instead; anything else
+    /// rethrows loudly with the row still queued.
     private func repushPlannerAsCreate(_ row: OutboxRow) async throws -> Bool {
         guard let task = try await store.plannerTask(id: row.recordID) else {
             try await store.removeOutboxRow(id: row.id)
@@ -1440,7 +1440,8 @@ final class SyncController: ObservableObject {
                 intent: PlannerIntent.create.rawValue,
                 name: task.name,
                 positionKey: task.positionKey,
-                categoryIDs: task.categoryIDs
+                categoryIDs: task.categoryIDs,
+                notes: task.notes
             ))
         } catch let error as APIError where error.code == "planner_conflict" {
             return try await adoptPlannerConflict(row, details: error.details)
@@ -1478,13 +1479,17 @@ final class SyncController: ObservableObject {
         // map only represents strings; UUIDs never contain a comma, so the
         // split is lossless). A missing key adopts the empty set — the
         // relay always sends it post-§14; pre-§14 responses carry no tags.
+        // Notes travel verbatim under their own key (missing adopts empty —
+        // the notes intent re-converges annotated rows on the next cycle).
         let categoryIDs = details["category_ids"]?.split(separator: ",").map(String.init) ?? []
+        let notes = details["notes"] ?? ""
         try await store.adoptPlannerTask(PlannerTask(
             id: row.recordID,
             name: name,
             positionKey: positionKey,
             completedOn: completedOn,
             categoryIDs: categoryIDs,
+            notes: notes,
             createdAt: createdAt,
             updatedAt: updatedAt
         ))

@@ -2,7 +2,8 @@ import Foundation
 
 /// One day-planner task (day-planner spec): a checklist row with an
 /// independent identity, a validated name, an optional ordered category set,
-/// an order key shared across devices, and a nullable civil completion date.
+/// optional notes, an order key shared across devices, and a nullable civil
+/// completion date.
 /// Tasks with identical names have separate identities.
 /// Planner rows never feed History, Insights, or Recents; they are not
 /// entries, categories, or synced timer drafts.
@@ -15,6 +16,11 @@ struct PlannerTask: Codable, Equatable, Identifiable, Sendable {
     /// empty when the task carries none — Start falls back to exact-text
     /// Recents inheritance). Synced as its own field intent.
     var categoryIDs: [String]
+    /// Optional free-text notes (edited in the task editor sheet; empty
+    /// when the task carries none — the same 2000-trimmed-rune bound as
+    /// entry notes, enforced client-side and at the relay). Copied into
+    /// the running draft at Start. Synced as its own field intent.
+    var notes: String
     /// Exact-decimal order key; display order is `(positionKey, id)`
     /// compared byte-wise (ASCII-only, so `String.<` agrees on all devices).
     var positionKey: String
@@ -28,6 +34,7 @@ struct PlannerTask: Codable, Equatable, Identifiable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, name
         case categoryIDs = "category_ids"
+        case notes
         case positionKey = "position_key"
         case completedOn = "completed_on"
         case createdAt = "created_at"
@@ -40,6 +47,7 @@ struct PlannerTask: Codable, Equatable, Identifiable, Sendable {
         positionKey: String,
         completedOn: String? = nil,
         categoryIDs: [String] = [],
+        notes: String = "",
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -48,6 +56,7 @@ struct PlannerTask: Codable, Equatable, Identifiable, Sendable {
         self.positionKey = positionKey
         self.completedOn = completedOn
         self.categoryIDs = categoryIDs
+        self.notes = notes
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -57,8 +66,10 @@ struct PlannerTask: Codable, Equatable, Identifiable, Sendable {
         id = try container.decode(String.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         // Pre-§14 relays omit the set: default to empty instead of failing
-        // the feed decode (the retag intent re-converges it).
+        // the feed decode (the retag intent re-converges it). Pre-§15
+        // relays omit notes the same way (the notes intent re-converges).
         categoryIDs = try container.decodeIfPresent([String].self, forKey: .categoryIDs) ?? []
+        notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         positionKey = try container.decode(String.self, forKey: .positionKey)
         completedOn = try container.decodeIfPresent(String.self, forKey: .completedOn)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
@@ -79,6 +90,8 @@ struct PlannerOperationPayload: Codable, Equatable, Sendable {
     var completedOn: String?
     /// Ordered category set for `create` (initial) and `retag` (replace).
     var categoryIDs: [String]?
+    /// Task notes for `create` (initial) and `notes` (replace).
+    var notes: String?
 
     enum CodingKeys: String, CodingKey {
         case operationID = "operation_id"
@@ -87,12 +100,13 @@ struct PlannerOperationPayload: Codable, Equatable, Sendable {
         case positionKey = "position_key"
         case completedOn = "completed_on"
         case categoryIDs = "category_ids"
+        case notes
     }
 }
 
 /// Planner field intents (backend/api/openapi.yaml `PlannerIntent`).
 enum PlannerIntent: String, Sendable {
-    case create, rename, move, complete, reopen, delete, retag
+    case create, rename, move, complete, reopen, delete, retag, notes
 }
 
 /// Civil-date capture (day-planner spec D2): the writing device records the
@@ -290,6 +304,11 @@ enum PlannerToday {
         var recents: [RecentEntry]
         /// Whether a timer draft persisted (planner Start gating).
         var timerActive: Bool
+        /// The linked task id of the persisted draft, if any (the `In
+        /// progress` row reads it on first paint).
+        var linkedTaskID: String?
+        /// The category catalog backing row icons (resolved on first paint).
+        var categories: [Category]
         /// The projected Today snapshot Track paints.
         var snapshot: Snapshot
     }

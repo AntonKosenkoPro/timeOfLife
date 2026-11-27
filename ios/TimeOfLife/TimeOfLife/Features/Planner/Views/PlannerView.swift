@@ -199,7 +199,9 @@ struct PlannerView: View {
             ForEach(Array(vm.snapshot.tasks.enumerated()), id: \.element.id) { index, task in
                 PlannerTaskRow(
                     task: task,
+                    categories: vm.rowCategories(for: task),
                     timerActive: vm.timerActive,
+                    isRunning: vm.linkedTaskID == task.id,
                     onToggle: { Task { await vm.toggleComplete(task) } },
                     onEdit: { vm.beginEdit(task) },
                     onStart: {
@@ -233,9 +235,9 @@ struct PlannerView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .accessibilityIdentifier("PlannerTaskList")
-        // The task editor sheet (day-planner 14.1): Name + ordered
-        // Categories in Log Time sheet grammar. Tapping a row is the only
-        // entry point — the row itself never renames inline.
+        // The task editor sheet (day-planner 14.1/15.1): Name + ordered
+        // Categories + Notes in Log Time sheet grammar. Tapping a row is
+        // the only entry point — the row itself never renames inline.
         .sheet(item: $vm.editingTask) { _ in
             PlannerTaskEditorSheet(vm: vm)
         }

@@ -352,6 +352,7 @@
 "planner.title" = "Hoje";
 "planner.progressLabel" = "Concluído %1$d de %2$d";
 "planner.emptyHint" = "As tarefas adicionadas aparecem aqui até serem concluídas.";
+"planner.inProgress" = "Em andamento";
 "planner.composerPlaceholder" = "Adicionar uma tarefa";
 "planner.add" = "Adicionar";
 "planner.editorTitle" = "Editar tarefa";

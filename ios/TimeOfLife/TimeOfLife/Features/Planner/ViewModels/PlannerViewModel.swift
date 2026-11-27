@@ -30,11 +30,20 @@ final class PlannerViewModel: ObservableObject {
     @Published var sheetName = ""
     /// The editor sheet's ordered category selection, prefilled from the task.
     @Published var sheetCategoryIDs: [String] = []
+    /// The editor sheet's notes draft, prefilled from the task. Optional —
+    /// empty when the task carries no notes. The 2000-trimmed-rune relay
+    /// bound gates Save (the pushed `NotesEditorPage` also enforces it).
+    @Published var sheetNotes = ""
     /// The category catalog backing the sheet's TagSelector.
     @Published var availableCategories: [Category] = []
     /// Whether a timer run is active (planner stays usable, but no task
     /// can start another run while one is active).
     @Published private(set) var timerActive = false
+    /// The linked task id of the active run, if any (the `In progress` row
+    /// reads it; nil for ordinary runs and when idle).
+    @Published private(set) var linkedTaskID: String?
+    /// The category catalog backing row icons, keyed by id.
+    @Published private(set) var categoryByID: [String: Category] = [:]
     /// Non-field recoverable error (persistence failures).
     @Published var errorMessage: String?
     /// Undo failure surface (mirrors the entry/category undo contract).
@@ -118,11 +127,15 @@ final class PlannerViewModel: ObservableObject {
             todayString = PlannerCivilDate.today()
             let fetched = try await store.plannerTasks()
             let fetchedRecents = try await store.recents(limit: Self.chipPoolLimit)
-            let draftExists = try await store.timerDraft() != nil
+            let fetchedCategories = try await store.categories()
+            let draft = try await store.timerDraft()
             let projected = PlannerToday.project(tasks: fetched, on: todayString)
             tasks = fetched
             recents = fetchedRecents
-            timerActive = draftExists
+            timerActive = draft != nil
+            linkedTaskID = draft?.plannerTaskID
+            categoryByID = Dictionary(uniqueKeysWithValues: fetchedCategories.map { ($0.id, $0) })
+            availableCategories = fetchedCategories
             // A submit-then-load round-trip animates only the fresh row's
             // insertion (its `.transition` fires); every other load — tab
             // return, sync exit, toggle, move, delete — publishes silently.
@@ -156,11 +169,14 @@ final class PlannerViewModel: ObservableObject {
     static func preload(store: LocalStore) async throws -> PlannerToday.Preloaded {
         let today = PlannerCivilDate.today()
         let tasks = try await store.plannerTasks()
+        let draft = try await store.timerDraft()
         return PlannerToday.Preloaded(
             today: today,
             tasks: tasks,
             recents: try await store.recents(limit: chipPoolLimit),
-            timerActive: try await store.timerDraft() != nil,
+            timerActive: draft != nil,
+            linkedTaskID: draft?.plannerTaskID,
+            categories: try await store.categories(),
             snapshot: PlannerToday.project(tasks: tasks, on: today)
         )
     }
@@ -177,8 +193,18 @@ final class PlannerViewModel: ObservableObject {
         tasks = preloaded.tasks
         recents = preloaded.recents
         timerActive = preloaded.timerActive
+        linkedTaskID = preloaded.linkedTaskID
+        categoryByID = Dictionary(uniqueKeysWithValues: preloaded.categories.map { ($0.id, $0) })
+        availableCategories = preloaded.categories
         snapshot = preloaded.snapshot
         needsReload = false
+    }
+
+    /// Ordered categories for a task row (day-planner 15.4): the task's
+    /// ordered id set resolved against the loaded catalog; unknown ids
+    /// drop (the same prune rule as Stop).
+    func rowCategories(for task: PlannerTask) -> [Category] {
+        task.categoryIDs.compactMap { categoryByID[$0] }
     }
 
     // MARK: - Composer (fast repeated input)
@@ -283,15 +309,16 @@ final class PlannerViewModel: ObservableObject {
 
     // MARK: - Task editor sheet
 
-    /// Opens the editor sheet for a task, prefilling the name and ordered
-    /// category drafts from the snapshot copy. Tapping a row is the only
-    /// entry point — there is no inline renaming. Starts a fresh error
-    /// scope: a banner from an earlier surface must not greet the editor.
+    /// Opens the editor sheet for a task, prefilling the name, ordered
+    /// category, and notes drafts from the snapshot copy. Tapping a row is
+    /// the only entry point — there is no inline renaming. Starts a fresh
+    /// error scope: a banner from an earlier surface must not greet the editor.
     func beginEdit(_ task: PlannerTask) {
         errorMessage = nil
         editingTask = task
         sheetName = task.name
         sheetCategoryIDs = task.categoryIDs
+        sheetNotes = task.notes
     }
 
     /// Closes the editor sheet without writing.
@@ -301,46 +328,58 @@ final class PlannerViewModel: ObservableObject {
 
     /// Whether the sheet's Save confirm is enabled (Log Time validity-gate
     /// grammar): the trimmed name must satisfy the shared timer-name rule.
-    /// Categories are optional — the set may be empty.
+    /// Categories are optional — the set may be empty; notes are optional
+    /// but bound to the shared 2000-trimmed-rune relay limit (the pushed
+    /// editor page enforces the same bound per keystroke).
     var isSheetSaveEnabled: Bool {
         guard editingTask != nil else { return false }
         guard case .valid = ActivityName.validate(ActivityName.normalized(sheetName)) else { return false }
-        return true
+        return !NotesCounter.isOverLimit(sheetNotes)
     }
 
-    /// Saves the editor sheet: renames when the name changed and retags
-    /// when the ordered set changed — each as its own field intent, so a
-    /// name-only edit sends no categories and a tag-only edit sends no
-    /// name. Position, completion, and every timer/entry stay untouched.
-    /// An invalid name or a failed write keeps the sheet open with the
-    /// draft intact (Log Time save-failure grammar). Returns whether the
-    /// sheet closed.
+    /// Saves the editor sheet: the name, ordered set, and notes each travel
+    /// as their own field intent when changed (`rename`, `retag`, `notes`),
+    /// so a name-only edit sends no tags and a notes-only edit sends no
+    /// name. When the task carries the active linked run, the running
+    /// draft's live categories and notes converge in the same chokepoint
+    /// transaction (the locked name never moves). Position, completion, and
+    /// every timer/entry stay untouched.
+    /// An invalid name, over-limit notes, or a failed write keeps the sheet
+    /// open with the draft intact (Log Time save-failure grammar). Returns
+    /// whether the sheet closed.
     func saveSheet() async -> Bool {
         guard let task = editingTask else { return false }
         let trimmed = ActivityName.normalized(sheetName)
         guard case .valid = ActivityName.validate(trimmed) else { return false }
+        guard !NotesCounter.isOverLimit(sheetNotes) else { return false }
         do {
-            if trimmed != task.name {
-                let outcome = try await store.renamePlannerTask(
-                    id: task.id,
+            let outcome = try await store.savePlannerTaskSheet(
+                id: task.id,
+                write: PlannerSheetWrite(
                     name: trimmed,
-                    operationID: await store.newRecordID()
-                )
-                guard case .saved = outcome else {
-                    errorMessage = L10n.text(in: .default, code: "error.unknown")
-                    return false
-                }
-            }
-            if sheetCategoryIDs != task.categoryIDs {
-                let outcome = try await store.retagPlannerTask(
-                    id: task.id,
                     categoryIDs: sheetCategoryIDs,
-                    operationID: await store.newRecordID()
+                    notes: sheetNotes,
+                    renameOperationID: await store.newRecordID(),
+                    retagOperationID: await store.newRecordID(),
+                    notesOperationID: await store.newRecordID()
                 )
-                guard case .saved = outcome else {
-                    errorMessage = L10n.text(in: .default, code: "error.unknown")
-                    return false
-                }
+            )
+            guard case .saved = outcome else {
+                errorMessage = L10n.text(in: .default, code: "error.unknown")
+                return false
+            }
+            // A save on the running task converged its draft in the same
+            // transaction (day-planner 15.2) — re-mirror the Live Activity
+            // chips from the new set (mid-run retag refreshes chips in
+            // place). The ticker and the locked name are untouched.
+            if let draft = try await store.timerDraft(),
+               draft.plannerTaskID == task.id,
+               let startedAt = draft.startedAt {
+                await timer.refreshLiveActivity(
+                    text: draft.activityText,
+                    categoryIDs: draft.categoryIDs,
+                    startedAt: startedAt
+                )
             }
             editingTask = nil
             errorMessage = nil
@@ -491,7 +530,8 @@ final class PlannerViewModel: ObservableObject {
     /// holding categories starts with exactly those (sheet-assigned); a
     /// task without categories falls back to the ordinary
     /// exact-text category inheritance (the newest committed entry with
-    /// that exact text lends its ordered categories). The task's id rides
+    /// that exact text lends its ordered categories). The task's notes ride
+    /// the draft too (day-planner §15). The task's id rides
     /// the draft so Stop completes exactly it. Returns false (staying
     /// usable, starting nothing) when a run is active, saving, or awaiting
     /// a Stop retry — a second Start never replaces a pending or active run
@@ -507,6 +547,7 @@ final class PlannerViewModel: ObservableObject {
             return try await timer.startLinkedTask(
                 name: task.name,
                 categoryIDs: inherited,
+                notes: task.notes,
                 taskID: task.id,
                 startedAt: Date()
             )

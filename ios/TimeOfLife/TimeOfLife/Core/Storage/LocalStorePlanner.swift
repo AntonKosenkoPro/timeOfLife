@@ -50,7 +50,8 @@ extension LocalStore {
 
     /// Maps a `planner_tasks` row into a PlannerTask. `category_ids` is
     /// the ordered set as a comma-joined TEXT column (timer_state grammar);
-    /// NULL or empty decodes to no categories.
+    /// NULL or empty decodes to no categories. `notes` is the free-text
+    /// note (NULL on pre-§15 rows heals to empty).
     private static func plannerTask(from row: Row) -> PlannerTask {
         let joined: String? = row["category_ids"]
         return PlannerTask(
@@ -59,6 +60,7 @@ extension LocalStore {
             positionKey: row["position_key"],
             completedOn: row["completed_on"],
             categoryIDs: plannerCategoryIDs(from: joined),
+            notes: row["notes"] ?? "",
             createdAt: row["created_at"],
             updatedAt: row["updated_at"]
         )
@@ -105,8 +107,9 @@ extension LocalStore {
     /// Creates a planner task (appended at `positionKey`, allocated by the
     /// caller between its neighbors) plus its outbox create row in one
     /// transaction. Names follow the shared timer-name rule; identical
-    /// names are separate identities. New tasks carry no categories —
-    /// the editor sheet tags them afterwards through the retag intent.
+    /// names are separate identities. New tasks carry no categories and no
+    /// notes — the editor sheet tags and annotates them afterwards through
+    /// the retag and notes intents.
     /// Returns `.invalid` without writing when the name is empty or too long.
     func createPlannerTask(
         id: String,
@@ -132,8 +135,8 @@ extension LocalStore {
             do {
                 try db.execute(
                     sql: """
-                        INSERT INTO planner_tasks (id, name, category_ids, position_key, completed_on, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, NULL, ?, ?)
+                        INSERT INTO planner_tasks (id, name, category_ids, notes, position_key, completed_on, created_at, updated_at)
+                        VALUES (?, ?, ?, '', ?, NULL, ?, ?)
                         """,
                     arguments: [task.id, task.name, Self.joinPlannerCategoryIDs(task.categoryIDs), task.positionKey, task.createdAt, task.updatedAt]
                 )
@@ -196,6 +199,31 @@ extension LocalStore {
                                        operationID: operationID,
                                        taskID: task.id, intent: PlannerIntent.retag.rawValue,
                                        categoryIDs: task.categoryIDs
+                                   ))
+            return .saved(task)
+        }
+    }
+
+    /// Replaces a planner task's notes plus its outbox row in one
+    /// transaction (the `notes` field intent — its own revision and
+    /// acceptance, like rename). A notes edit never changes the name,
+    /// position, completion, categories, or any timer/entry. Unchanged
+    /// notes enqueue nothing. The 2000-trimmed-rune bound is enforced by
+    /// the caller (sheet validity gate) and the relay, mirroring entry
+    /// notes; the store keeps the text verbatim.
+    func setPlannerTaskNotes(id: String, notes: String, operationID: String, now: Date = Date()) throws -> PlannerMutation {
+        let stamped = Self.storageQuantized(now)
+        return try queue.write { db in
+            guard var task = try Self.fetchPlannerTask(db, id: id) else { return .missing }
+            guard task.notes != notes else { return .saved(task) }
+            task.notes = notes
+            task.updatedAt = stamped
+            try Self.writePlannerTask(db, task)
+            try Self.enqueueOutbox(db: db, resource: Self.plannerResource, recordID: task.id,
+                                   op: "update", payload: PlannerOperationPayload(
+                                       operationID: operationID,
+                                       taskID: task.id, intent: PlannerIntent.notes.rawValue,
+                                       notes: task.notes
                                    ))
             return .saved(task)
         }
@@ -334,10 +362,10 @@ extension LocalStore {
             let task = try JSONDecoder().decode(PlannerTask.self, from: record.data)
             try db.execute(
                 sql: """
-                    INSERT OR IGNORE INTO planner_tasks (id, name, category_ids, position_key, completed_on, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT OR IGNORE INTO planner_tasks (id, name, category_ids, notes, position_key, completed_on, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                arguments: [task.id, task.name, Self.joinPlannerCategoryIDs(task.categoryIDs), task.positionKey, task.completedOn, task.createdAt, task.updatedAt]
+                arguments: [task.id, task.name, Self.joinPlannerCategoryIDs(task.categoryIDs), task.notes, task.positionKey, task.completedOn, task.createdAt, task.updatedAt]
             )
             try db.execute(sql: "DELETE FROM undo_buffer WHERE id = ?", arguments: [bufferID])
             return task
@@ -345,7 +373,9 @@ extension LocalStore {
     }
 
     /// Fetches one planner task row inside a write transaction.
-    private static func fetchPlannerTask(_ db: Database, id: String) throws -> PlannerTask? {
+    /// Internal (not private): the convergence extension in
+    /// `LocalStorePlannerConvergence.swift` shares these helpers.
+    static func fetchPlannerTask(_ db: Database, id: String) throws -> PlannerTask? {
         guard let row = try Row.fetchOne(db, sql: """
             SELECT * FROM planner_tasks WHERE id = ?
             """, arguments: [id]) else { return nil }
@@ -353,15 +383,16 @@ extension LocalStore {
     }
 
     /// Rewrites a planner task row (the caller owns the transaction and the
-    /// outbox row).
-    private static func writePlannerTask(_ db: Database, _ task: PlannerTask) throws {
+    /// outbox row). Internal (not private): the convergence extension in
+    /// `LocalStorePlannerConvergence.swift` shares these helpers.
+    static func writePlannerTask(_ db: Database, _ task: PlannerTask) throws {
         try db.execute(
             sql: """
                 UPDATE planner_tasks
-                SET name = ?, category_ids = ?, position_key = ?, completed_on = ?, updated_at = ?
+                SET name = ?, category_ids = ?, notes = ?, position_key = ?, completed_on = ?, updated_at = ?
                 WHERE id = ?
                 """,
-            arguments: [task.name, Self.joinPlannerCategoryIDs(task.categoryIDs), task.positionKey, task.completedOn, task.updatedAt, task.id]
+            arguments: [task.name, Self.joinPlannerCategoryIDs(task.categoryIDs), task.notes, task.positionKey, task.completedOn, task.updatedAt, task.id]
         )
     }
 }

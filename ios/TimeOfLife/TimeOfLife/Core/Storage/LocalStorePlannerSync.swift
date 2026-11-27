@@ -72,17 +72,18 @@ extension LocalStore {
                 }
                 try db.execute(
                     sql: """
-                        INSERT INTO planner_tasks (id, name, category_ids, position_key, completed_on, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO planner_tasks (id, name, category_ids, notes, position_key, completed_on, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(id) DO UPDATE SET
                             name = excluded.name,
                             category_ids = excluded.category_ids,
+                            notes = excluded.notes,
                             position_key = excluded.position_key,
                             completed_on = excluded.completed_on,
                             updated_at = excluded.updated_at
                         """,
                     arguments: [
-                        id, change.task.name, Self.joinPlannerCategoryIDs(change.task.categoryIDs),
+                        id, change.task.name, Self.joinPlannerCategoryIDs(change.task.categoryIDs), change.task.notes,
                         change.task.positionKey, change.task.completedOn,
                         change.task.createdAt, change.task.updatedAt,
                     ]
@@ -142,16 +143,17 @@ extension LocalStore {
             }
             try db.execute(
                 sql: """
-                    INSERT INTO planner_tasks (id, name, category_ids, position_key, completed_on, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO planner_tasks (id, name, category_ids, notes, position_key, completed_on, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         category_ids = excluded.category_ids,
+                        notes = excluded.notes,
                         position_key = excluded.position_key,
                         completed_on = excluded.completed_on,
                         updated_at = excluded.updated_at
                     """,
-                arguments: [task.id, task.name, Self.joinPlannerCategoryIDs(task.categoryIDs), task.positionKey, task.completedOn, task.createdAt, task.updatedAt]
+                arguments: [task.id, task.name, Self.joinPlannerCategoryIDs(task.categoryIDs), task.notes, task.positionKey, task.completedOn, task.createdAt, task.updatedAt]
             )
             try Self.dropPendingPlannerIntent(db, recordID: task.id)
         }

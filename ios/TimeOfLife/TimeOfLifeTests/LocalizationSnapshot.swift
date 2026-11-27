@@ -154,6 +154,7 @@ enum LocalizationSnapshot {
         "planner.composerPlaceholder",
         "planner.editorTitle",
         "planner.emptyHint",
+        "planner.inProgress",
         "planner.markDone",
         "planner.noMatch",
         "planner.progressLabel",

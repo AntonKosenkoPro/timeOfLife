@@ -528,6 +528,7 @@ struct PlannerOperationBody: Encodable, Sendable {
     var positionKey: String?
     var completedOn: String?
     var categoryIDs: [String]?
+    var notes: String?
 
     enum CodingKeys: String, CodingKey {
         case operationID = "operation_id"
@@ -536,6 +537,7 @@ struct PlannerOperationBody: Encodable, Sendable {
         case positionKey = "position_key"
         case completedOn = "completed_on"
         case categoryIDs = "category_ids"
+        case notes
     }
 
     init(op: PlannerOperationPayload) {
@@ -546,6 +548,7 @@ struct PlannerOperationBody: Encodable, Sendable {
         positionKey = op.positionKey
         completedOn = op.completedOn
         categoryIDs = op.categoryIDs
+        notes = op.notes
     }
 }
 
@@ -566,12 +569,13 @@ struct PlannerFeedResponse: Decodable, Sendable {
 
 /// The wire shape of a PlannerTask (OpenAPI `PlannerTask`): RFC 3339
 /// timestamps, a plain civil-date string (or null) for `completed_on`, the
-/// ordered `category_ids` set, the commit-ordered `revision`, and the
-/// terminal `deleted` marker.
+/// ordered `category_ids` set, the free-text `notes`, the commit-ordered
+/// `revision`, and the terminal `deleted` marker.
 struct PlannerTaskWireDTO: Decodable, Sendable {
     var id: String
     var name: String
     var categoryIDs: [String]
+    var notes: String
     var positionKey: String
     var completedOn: String?
     var revision: Int64
@@ -580,7 +584,7 @@ struct PlannerTaskWireDTO: Decodable, Sendable {
     var deleted: Bool
 
     enum CodingKeys: String, CodingKey {
-        case id, name, revision, deleted
+        case id, name, notes, revision, deleted
         case categoryIDs = "category_ids"
         case positionKey = "position_key"
         case completedOn = "completed_on"
@@ -593,8 +597,10 @@ struct PlannerTaskWireDTO: Decodable, Sendable {
         id = try container.decode(String.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         // Pre-§14 relays omit the set: default to empty instead of failing
-        // the feed decode (the retag intent re-converges it).
+        // the feed decode (the retag intent re-converges it). Pre-§15
+        // relays omit notes the same way (the notes intent re-converges).
         categoryIDs = try container.decodeIfPresent([String].self, forKey: .categoryIDs) ?? []
+        notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         positionKey = try container.decode(String.self, forKey: .positionKey)
         // A civil date (`YYYY-MM-DD`) or null — a plain string, never an
         // RFC 3339 timestamp, so no WireDate decoding applies.
@@ -616,6 +622,7 @@ extension RemoteCatalogRepository {
                 positionKey: dto.positionKey,
                 completedOn: dto.completedOn,
                 categoryIDs: dto.categoryIDs,
+                notes: dto.notes,
                 createdAt: dto.createdAt,
                 updatedAt: dto.updatedAt
             ),

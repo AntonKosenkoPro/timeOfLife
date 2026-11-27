@@ -1,14 +1,17 @@
 import SwiftUI
 
-/// The task editor sheet (day-planner 14.1): edits one planner task's name
-/// and ordered category set in Log Time sheet grammar — the same field
-/// order (Name, then Categories), the same card chrome (`FormCard`), the
-/// same validity gate (Save disabled until the trimmed name satisfies the
-/// shared timer-name rule), and the same inline category creation —
-/// reduced to those two fields. Categories are optional (zero allowed,
-/// order preserved); identical names stay separate identities. Tapping a
-/// planner row is the only entry point. A save failure surfaces as a
-/// non-field error with the draft intact and the sheet open.
+/// The task editor sheet (day-planner 14.1/15.1): edits one planner task's
+/// name, ordered category set, and notes in Log Time sheet grammar — the
+/// same field order (Name, then Categories, then Notes), the same card
+/// chrome (`FormCard`), the same validity gate (Save disabled until the
+/// trimmed name satisfies the shared timer-name rule and the notes satisfy
+/// the shared 2000-trimmed-rune bound), the same inline category creation,
+/// and the same presenter-plus-pushed-`NotesEditorPage` for notes — reduced
+/// to those three fields. Categories and notes are optional (zero tags and
+/// empty notes allowed, tag order preserved); identical names stay separate
+/// identities. Tapping a planner row is the only entry point. A save
+/// failure surfaces as a non-field error with the draft intact and the
+/// sheet open.
 struct PlannerTaskEditorSheet: View {
     @ObservedObject var vm: PlannerViewModel
     @EnvironmentObject var container: AppContainer
@@ -32,6 +35,7 @@ struct PlannerTaskEditorSheet: View {
                 VStack(spacing: Theme.spacingMedium) {
                     nameCard
                     categoriesCard
+                    notesCard
                     if vm.errorMessage != nil {
                         errorSection
                     }
@@ -127,6 +131,41 @@ struct PlannerTaskEditorSheet: View {
                     isScrollable: false
                 )
             }
+        }
+    }
+
+    /// The Notes card (Log Time notes-card grammar): a presenter row — a
+    /// caption plus a trailing chevron over the full-width 1–5 line
+    /// preview (placeholder when empty) — that pushes the shared
+    /// `NotesEditorPage` (copy-on-open: X discards, ✓ writes
+    /// `vm.sheetNotes` only and the validity gate re-evaluates).
+    private var notesCard: some View {
+        FormCard(accessibilityID: "PlannerEditorNotesRow", resignFocus: focusedField = nil) {
+            NavigationLink {
+                NotesEditorPage(initialText: vm.sheetNotes, entryName: vm.sheetName) { vm.sheetNotes = $0 }
+            } label: {
+                VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                    HStack(spacing: Theme.spacingSmall) {
+                        Text(L10n.entryNotesLabel.text)
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                            .accessibilityHidden(true)
+                    }
+                    Text(vm.sheetNotes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.sheetNotes)
+                        .font(.body)
+                        .lineLimit(1...5)
+                        .foregroundStyle(vm.sheetNotes.isEmpty ? Theme.textSecondary : Theme.textPrimary)
+                        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea, alignment: .leading)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.entryNotesLabel.text)
+            .accessibilityValue(vm.sheetNotes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.sheetNotes)
+            .accessibilityIdentifier("PlannerEditorNotesField")
         }
     }
 

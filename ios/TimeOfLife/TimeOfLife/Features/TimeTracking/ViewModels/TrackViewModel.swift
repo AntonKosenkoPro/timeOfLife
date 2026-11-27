@@ -474,7 +474,9 @@ final class TrackViewModel: ObservableObject {
     }
 
     /// Toggles a category on the running draft (D4): rewrites only the
-    /// running draft snapshot — never an entry, history row, or recents.
+    /// running draft snapshot — never an entry, history row, or recents —
+    /// and, when the run is linked to a planner task, converges the task's
+    /// ordered set in the same chokepoint transaction (day-planner 15.2).
     func toggleDraftCategory(_ categoryID: String) {
         guard case let .running(draft, startedAt) = state else { return }
         var updated = draft
@@ -485,12 +487,7 @@ final class TrackViewModel: ObservableObject {
         }
         state = .running(updated, startedAt: startedAt)
         Task {
-            try? await service.startTimerDraft(
-                text: updated.text,
-                categoryIDs: updated.categoryIDs,
-                notes: updated.notes,
-                startedAt: startedAt
-            )
+            try? await service.retagRunningDraft(updated.categoryIDs)
         }
     }
 
@@ -515,7 +512,8 @@ final class TrackViewModel: ObservableObject {
     }
 
     /// Appends an id to a held draft and persists the snapshot, rewrapped
-    /// into the state it came from.
+    /// into the state it came from. A linked run converges the task's set
+    /// in the same chokepoint transaction (day-planner 15.2).
     private func attachToDraft(
         _ categoryID: String,
         draft: TrackState.Draft,
@@ -527,12 +525,7 @@ final class TrackViewModel: ObservableObject {
         updated.categoryIDs.append(categoryID)
         state = rewrap(updated, startedAt)
         Task {
-            try? await service.startTimerDraft(
-                text: updated.text,
-                categoryIDs: updated.categoryIDs,
-                notes: updated.notes,
-                startedAt: startedAt
-            )
+            try? await service.retagRunningDraft(updated.categoryIDs)
         }
     }
 
