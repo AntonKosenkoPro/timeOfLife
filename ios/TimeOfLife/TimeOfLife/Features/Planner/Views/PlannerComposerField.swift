@@ -94,7 +94,9 @@ struct PlannerComposerField: UIViewRepresentable {
         uiView.accessibilityIdentifier = accessibilityIdentifier
         // Become-only, mirroring SwiftUI `.focused`: the binding asserts
         // focus (initial entry, chip tap) and the begin-echo keeps it
-        // truthful, so any update while unfocused re-asserts. Resigns arrive
+        // truthful, so any update while unfocused re-asserts — unless the
+        // last Return cleared it (day-planner 22.1: the empty-draft resign
+        // disarms here, so the dismissal sticks). Resigns arrive
         // solely from the system — nothing here ever resigns.
         if focused.wrappedValue, !uiView.isFirstResponder {
             _ = uiView.becomeFirstResponder()
@@ -120,9 +122,18 @@ struct PlannerComposerField: UIViewRepresentable {
         /// keyboard never animates away regardless of round-trip latency.
         /// The verdict reads the field itself (ground truth at dispatch),
         /// not the binding (which the in-flight keystroke may not have
-        /// echoed yet).
+        /// echoed yet). The resign branch clears the focus intent
+        /// synchronously (day-planner 22.1): the become-only recovery in
+        /// `updateUIView` re-asserts while the intent reads true, and
+        /// `textFieldDidEndEditing` deliberately leaves it untouched — so
+        /// without this disarm the resign-triggered update storm can
+        /// re-grab first responder and the keyboard never visibly closes.
+        /// The valid-submit branch leaves the intent set (no-resign).
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-            if PlannerComposerField.shouldResignOnReturn(text: textField.text ?? "") { return true }
+            if PlannerComposerField.shouldResignOnReturn(text: textField.text ?? "") {
+                parent.focused.wrappedValue = false
+                return true
+            }
             parent.onReturn()
             return false
         }

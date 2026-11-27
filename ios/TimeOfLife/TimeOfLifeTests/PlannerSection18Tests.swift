@@ -151,6 +151,65 @@ struct PlannerSection18Tests {
         }
     }
 
+    // MARK: - Empty Return stays resigned (22.1)
+
+    @Test("empty Return clears the focus intent at dispatch")
+    func emptyReturnClearsFocusIntent() throws {
+        // Structural pin (day-planner 22.1): the resign branch of
+        // `textFieldShouldReturn` must clear the `FocusState` intent
+        // synchronously at dispatch. The become-only recovery in
+        // `updateUIView` re-asserts first responder while the intent reads
+        // true — and `textFieldDidEndEditing` deliberately leaves it
+        // untouched (no end-echo) — so without this disarm the
+        // resign-triggered update storm (editing mirror, keyboardWillHide,
+        // chips unmount) can re-grab focus before SwiftUI reconciles the
+        // unclaimed write, and the keyboard never visibly closes (owner
+        // report 2026-11-27; the sim-hosted setup always reconciles first,
+        // so only this pin goes red). The valid-submit branch must keep
+        // declining the resign untouched (7.1 suite).
+        let field = try featureSource(named: "PlannerComposerField.swift")
+        #expect(
+            field.contains("focused.wrappedValue = false"),
+            "the empty-Return resign branch must clear the focus intent at dispatch"
+        )
+    }
+
+    @Test("empty Return resigns AND stays resigned across view updates")
+    func emptyReturnStaysResignedAcrossUpdates() async throws {
+        let ctx = try await makeHostedPlanner()
+        #expect(ctx.field.isFirstResponder, "composer must hold focus")
+        // Real dispatch (same selector the keyboard invokes): a `true`
+        // verdict lets UIKit resign — the only submit-path resign allowed.
+        let verdict = ctx.field.delegate?.textFieldShouldReturn?(ctx.field) ?? false
+        #expect(verdict == true, "empty-draft Return must allow the default resign")
+        // UIKit performs the default resign after a `true` verdict.
+        _ = ctx.field.resignFirstResponder()
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(!ctx.field.isFirstResponder, "empty Return must resign")
+        // Device sequence (§22 root cause): the dismissal posts
+        // keyboardWillHide and publishes state behind the view — each pass
+        // runs `updateUIView`. Pre-fix the still-true focus intent re-grabs
+        // first responder on that pass, so the keyboard never visibly
+        // closes; the fix clears the intent at dispatch, so the field
+        // stays resigned. Show-then-hide guarantees two real update
+        // passes even when the sim never raised the software keyboard;
+        // the draft publish guarantees a third.
+        NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
+        ctx.vm.draft = ""
+        let settleUntil = Date().addingTimeInterval(1)
+        var regrabbedSamples = 0
+        var samples = 0
+        while Date() < settleUntil {
+            samples += 1
+            if ctx.field.isFirstResponder { regrabbedSamples += 1 }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        #expect(regrabbedSamples == 0, "empty Return re-grabbed focus in \(regrabbedSamples)/\(samples) settle samples")
+        #expect(!ctx.field.isFirstResponder, "composer must stay resigned after empty Return")
+    }
+
     // MARK: - Disabled Start reject gate (18.4; error UI in §19)
 
     @Test("a disabled Start tap rejects with the haptic and starts nothing")
