@@ -78,4 +78,15 @@ var (
 	// notification id was already processed. The caller treats it as an
 	// idempotent no-op (HTTP 200, no state change).
 	ErrNotificationReplay = errors.New("apple notification already processed")
+
+	// ErrPlannerGone is returned when a planner operation targets a task id
+	// carrying a terminal deletion marker. The marker never clears: the
+	// caller maps it to 410 planner_gone and converges by dropping the
+	// local copy — retrying the operation is futile.
+	ErrPlannerGone = errors.New("planner task deleted")
+
+	// ErrPlannerConflict is returned by a planner create whose task id is
+	// already live under a different operation id. The caller maps it to
+	// 409 planner_conflict with the server's current task in details.
+	ErrPlannerConflict = errors.New("planner task already exists")
 )

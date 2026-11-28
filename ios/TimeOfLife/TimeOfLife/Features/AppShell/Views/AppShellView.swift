@@ -25,6 +25,10 @@ struct AppShellView: View {
     /// sync-exit reload below would be missed (HistoryView precedent).
     @EnvironmentObject var sync: SyncController
     @StateObject private var trackVM: TrackViewModel
+    /// The Today planner view model (add-day-planner): owned here (the
+    /// trackVM pattern) so the Track toolbar progress control and the
+    /// pushed Today page share one snapshot and one serialized reload.
+    @StateObject private var plannerVM: PlannerViewModel
     /// Presents the Log Time sheet from History (manual-entry spec). Owned
     /// here so the [+] lives in the same toolbar scope as the Profile
     /// button; the sheet itself stays in `HistoryView`, which owns the
@@ -39,7 +43,7 @@ struct AppShellView: View {
     /// App-owned clock (screenshot-capture seam; production `.live`).
     private let clock: AppClock
 
-    init(vm: AppShellViewModel, container: AppContainer, trackSnapshot: TrackSnapshot? = nil, clock: AppClock = .live) {
+    init(vm: AppShellViewModel, container: AppContainer, trackSnapshot: TrackSnapshot? = nil, plannerSnapshot: PlannerToday.Preloaded? = nil, clock: AppClock = .live) {
         _vm = StateObject(wrappedValue: vm)
         self.clock = clock
         _trackVM = StateObject(wrappedValue: {
@@ -56,6 +60,21 @@ struct AppShellView: View {
                 trackVM.adopt(trackSnapshot)
             }
             return trackVM
+        }())
+        _plannerVM = StateObject(wrappedValue: {
+            let plannerVM = PlannerViewModel(
+                store: container.localStore,
+                undoBuffer: container.undoBuffer,
+                timer: container.timerService
+            )
+            // A gate-preloaded snapshot paints complete on the first commit
+            // instead of flashing 0/0 until the first reload
+            // (timer-capture-experience 12.3). Hosts without one load on
+            // appear as before.
+            if let plannerSnapshot {
+                plannerVM.adopt(plannerSnapshot)
+            }
+            return plannerVM
         }())
     }
 
@@ -198,11 +217,14 @@ struct AppShellView: View {
     }
 
     /// Serialized Track reload shared by the tab-return, Profile-exit, and
-    /// sync-exit paths.
+    /// sync-exit paths. The planner snapshot reloads alongside (same three
+    /// paths keep the toolbar progress and Today converged).
     @MainActor
     private func reloadTrack() async {
         trackVM.invalidate()
         await trackVM.loadIfNeeded()
+        plannerVM.invalidate()
+        await plannerVM.loadIfNeeded()
     }
 
     /// Track tab: its own push state. Profile is a path value here, so
@@ -233,6 +255,18 @@ struct AppShellView: View {
                     onLogTime: {},
                     onProfile: { vm.openProfile() }
                 ))
+                // The compact Today progress control (day-planner): a
+                // toolbar entry in the navigation chrome — outside the
+                // timer's measured layout, so counts and timer state never
+                // shift the numeric readout or Start/Stop. Usable while
+                // timing and when the list is empty.
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        PlannerProgressControl(snapshot: plannerVM.snapshot) {
+                            vm.trackPath.append(.planner)
+                        }
+                    }
+                }
                 .navigationDestination(for: ShellRoute.self) { route in
                     switch route {
                     case .profile:
@@ -297,6 +331,20 @@ struct AppShellView: View {
                         }
                     case .entry:
                         EmptyView()
+                    case .planner:
+                        // The Today day-planner (add-day-planner): pushed
+                        // onto the Track stack from the toolbar progress
+                        // control (namePicker precedent — the route stays a
+                        // value, the destination reads the planner view
+                        // model). A successful one-tap Start pops back to
+                        // Track and reloads it, so the linked run presents
+                        // immediately (day-planner 9.2): the pop alone
+                        // would leave the settled idle snapshot on screen
+                        // until the next tab switch.
+                        PlannerView(vm: plannerVM) {
+                            vm.trackPath.removeAll { $0 == .planner }
+                            Task { await reloadTrack() }
+                        }
                     case .categoryEditor:
                         // Inline category creation from the running-tag row
                         // (inline-category-creation): create mode only.

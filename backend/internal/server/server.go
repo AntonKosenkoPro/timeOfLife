@@ -322,6 +322,9 @@ func New(deps Dependencies) *Server {
 			r.Delete("/entries/{id}", h.DeleteEntry)
 			// Deletion tombstones (cross-device delete propagation).
 			r.Get("/deletions", h.ListDeletions)
+			// Day planner: per-task mutations + revision-ordered change feed.
+			r.Post("/planner/operations", h.ApplyPlannerOperation)
+			r.Get("/planner/feed", h.ListPlannerFeed)
 		})
 	})
 

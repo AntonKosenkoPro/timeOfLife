@@ -257,6 +257,7 @@ actor LocalStore {
             try migrator().migrate(queue)
             try healTimerStateNotesColumn(in: queue)
             try healDropRetiredProvenanceColumns(in: queue)
+            try healPlannerSchema(in: queue)
             return (queue, nil)
         }
         let sanitized = try sanitizedUserID(userID)
@@ -268,6 +269,7 @@ actor LocalStore {
         try migrator().migrate(queue)
         try healTimerStateNotesColumn(in: queue)
         try healDropRetiredProvenanceColumns(in: queue)
+        try healPlannerSchema(in: queue)
         if let existing = try boundUserMarker(in: queue), existing != sanitized {
             throw LocalStoreError.accountMismatch
         }
@@ -335,6 +337,67 @@ actor LocalStore {
         guard !columnNames.contains("notes") else { return }
         try queue.write { db in
             try db.execute(sql: "ALTER TABLE timer_state ADD COLUMN notes TEXT")
+        }
+    }
+
+    /// Forward-heals field files whose recorded v3 predates the planner
+    /// shape (day-planner follow-up fix): an in-place upgrade from an
+    /// intermediate build records "v3" without (all of) the planner
+    /// objects, so the shipped v3 migration is a no-op for them. A missing
+    /// `planner_tasks` — or one whose shape lacks a column current code
+    /// reads — makes `plannerTasks()` throw, so Today opens empty with the
+    /// generic error while Track keeps working (entry/draft reads never
+    /// touch the planner shape). Each statement converges one v3 object
+    /// and is a no-op where the converged shape already exists, mirroring
+    /// the shipped v3 definitions exactly. A present-but-incompatible
+    /// table is rebuilt: no reachable writer could have stored rows the
+    /// current code can read (every write references `position_key`), so
+    /// nothing readable is lost and the relay feed re-pulls planner state
+    /// on the next sync.
+    private static func healPlannerSchema(in queue: DatabaseQueue) throws {
+        let expectedColumns = ["id", "name", "position_key", "completed_on", "created_at", "updated_at"]
+        try queue.write { db in
+            let existing = try String.fetchAll(db, sql: "SELECT name FROM pragma_table_info('planner_tasks')")
+            if !Set(expectedColumns).isSubset(of: Set(existing)) {
+                try db.execute(sql: "DROP TABLE IF EXISTS planner_tasks")
+                try db.execute(sql: "DROP INDEX IF EXISTS index_planner_tasks_on_position")
+                try db.create(table: "planner_tasks") { t in
+                    t.column("id", .text).primaryKey()
+                    t.column("name", .text).notNull()
+                    t.column("category_ids", .text).notNull().defaults(to: "")
+                    t.column("notes", .text).notNull().defaults(to: "")
+                    t.column("position_key", .text).notNull()
+                    t.column("completed_on", .text)
+                    t.column("created_at", .datetime).notNull()
+                    t.column("updated_at", .datetime).notNull()
+                }
+                try db.execute(sql: """
+                    CREATE INDEX index_planner_tasks_on_position
+                    ON planner_tasks (position_key, id)
+                    """)
+            } else {
+                // Additive columns converge in place (no rebuild, no data
+                // loss — the feed re-converges tagged/annotated rows on the
+                // next sync):
+                if !existing.contains("category_ids") {
+                    // §14 additive column: existing rows keep their tasks and
+                    // converge to the empty set.
+                    try db.execute(sql: "ALTER TABLE planner_tasks ADD COLUMN category_ids TEXT NOT NULL DEFAULT ''")
+                }
+                if !existing.contains("notes") {
+                    // §15 additive column: existing rows keep their tasks and
+                    // converge to empty notes.
+                    try db.execute(sql: "ALTER TABLE planner_tasks ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
+                }
+            }
+            let syncColumns = try String.fetchAll(db, sql: "SELECT name FROM pragma_table_info('sync_state')")
+            if !syncColumns.contains("cursor_revision") {
+                try db.execute(sql: "ALTER TABLE sync_state ADD COLUMN cursor_revision INTEGER")
+            }
+            let timerColumns = try String.fetchAll(db, sql: "SELECT name FROM pragma_table_info('timer_state')")
+            if !timerColumns.contains("planner_task_id") {
+                try db.execute(sql: "ALTER TABLE timer_state ADD COLUMN planner_task_id TEXT")
+            }
         }
     }
 
@@ -406,7 +469,7 @@ actor LocalStore {
     /// (signed out) can never touch a database file, and a suspended store
     /// fails fast with `suspended` instead of acquiring a lock that iOS
     /// would kill the process for holding (0xdead10cc).
-    private var queue: DatabaseQueue {
+    var queue: DatabaseQueue {
         get throws {
             guard let dbQueue else { throw LocalStoreError.notBound }
             guard !DatabaseSuspension.shared.isSuspended else {
@@ -594,6 +657,43 @@ actor LocalStore {
             // commit them (they only ever fan out to activity/entry delete
             // rows) so a restart cannot trip on undecodable payloads.
             try Self.dropActivityUndoRows(db)
+        }
+        migrator.registerMigration("v3") { db in
+            // Day-planner tasks (add-day-planner): independent checklist
+            // rows with a validated name, an optional ordered category set
+            // (comma-joined TEXT, empty when untagged), optional free-text
+            // notes (TEXT, empty when unannotated — the same bound as entry
+            // notes), a shared exact-decimal order key and a nullable civil
+            // completion date.
+            // No deleted flag: terminal relay deletes remove the row (the
+            // marker lives on the relay and in the feed cursor, never
+            // locally).
+            try db.create(table: "planner_tasks") { t in
+                t.column("id", .text).primaryKey()
+                t.column("name", .text).notNull()
+                t.column("category_ids", .text).notNull().defaults(to: "")
+                t.column("notes", .text).notNull().defaults(to: "")
+                t.column("position_key", .text).notNull()
+                t.column("completed_on", .text)
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+            try db.execute(sql: """
+                CREATE INDEX index_planner_tasks_on_position
+                ON planner_tasks (position_key, id)
+                """)
+            // Revision cursor for the planner change feed (per-resource
+            // integer cursor alongside the existing `last_synced_at` dates;
+            // existing rows keep NULL and read back as 0).
+            try db.alter(table: "sync_state") { t in
+                t.add(column: "cursor_revision", .integer)
+            }
+            // The optional linked planner task of the running draft
+            // (day-planner D3): one-tap Start persists it; atomic Stop
+            // completes exactly it. Existing drafts acquire no link.
+            try db.alter(table: "timer_state") { t in
+                t.add(column: "planner_task_id", .text)
+            }
         }
         return migrator
     }
@@ -1229,8 +1329,45 @@ actor LocalStore {
     /// succeeding. Idempotent on `id`: a replay (retry after the entry
     /// committed) returns the existing committed record and still clears the
     /// draft, without enqueueing a second outbox create.
+    ///
+    /// With `plannerLink`, the same transaction also completes exactly the
+    /// linked planner task for Stop's civil date (day-planner D3) and queues
+    /// its completion alongside the entry create. A missing, deleted, or
+    /// already-completed task is a no-op for the planner — never a failure
+    /// for time capture, never a restore. A replay never reruns completion:
+    /// only the fresh-create path touches the task, so a reopen after Stop
+    /// survives a retried Stop. A save failure rolls back the entry, the
+    /// task, and both outbox rows together.
+    /// Completes exactly the linked planner task for Stop's civil date
+    /// inside the Stop transaction (day-planner D3). Missing (deleted) and
+    /// already-completed tasks match zero rows: no outbox row, no restore,
+    /// no failure for time capture. A save failure rolls the whole Stop
+    /// back, so the task is never completed without its entry.
+    private static func completePlannerLink(
+        _ db: Database,
+        entry: TimeEntry,
+        plannerLink: PlannerStopLink?
+    ) throws {
+        guard let plannerLink else { return }
+        try db.execute(
+            sql: """
+                UPDATE planner_tasks SET completed_on = ?, updated_at = ?
+                WHERE id = ? AND completed_on IS NULL
+                """,
+            arguments: [plannerLink.completedOn, entry.updatedAt, plannerLink.taskID]
+        )
+        guard db.changesCount > 0 else { return }
+        try Self.enqueueOutbox(db: db, resource: Self.plannerResource, recordID: plannerLink.taskID,
+                               op: "update", payload: PlannerOperationPayload(
+                                   operationID: plannerLink.operationID,
+                                   taskID: plannerLink.taskID,
+                                   intent: PlannerIntent.complete.rawValue,
+                                   completedOn: plannerLink.completedOn
+                               ))
+    }
+
     @discardableResult
-    func stopRunningTimer(_ entry: TimeEntry) throws -> EntryMutation {
+    func stopRunningTimer(_ entry: TimeEntry, plannerLink: PlannerStopLink? = nil) throws -> EntryMutation {
         let trimmed = ActivityName.normalized(entry.activityText)
         switch ActivityName.validate(trimmed) {
         case .empty, .tooLong:
@@ -1270,6 +1407,7 @@ actor LocalStore {
             }
             try Self.enqueueOutbox(db: db, resource: "entry", recordID: entry.id,
                                    op: "create", payload: entry)
+            try Self.completePlannerLink(db, entry: entry, plannerLink: plannerLink)
             try db.execute(sql: "DELETE FROM timer_state WHERE id = 'singleton'")
             var saved = entry
             saved.activityText = trimmed
@@ -1503,6 +1641,8 @@ actor LocalStore {
     /// The persisted running-timer draft, or nil when no timer is running.
     /// `categoryIDs` is the live ordered snapshot, `notes` the live notes
     /// snapshot; `activityText` is locked from Start until Stop.
+    /// `plannerTaskID` is the one-tap Start link (day-planner D3): the exact
+    /// task an atomic Stop completes; nil for ordinary runs.
     func timerDraft() throws -> RunningTimerDraft? {
         try queue.read { db in
             guard let row = try Row.fetchOne(db, sql: """
@@ -1513,40 +1653,48 @@ actor LocalStore {
             let notes: String? = row["notes"]
             let startedAt: Date? = row["started_at"]
             let status: String = row["status"]
+            let plannerTaskID: String? = row["planner_task_id"]
             return RunningTimerDraft(
                 activityText: text ?? "",
                 categoryIDs: Self.categoryIDs(from: joined),
                 notes: notes ?? "",
                 startedAt: startedAt,
-                status: status
+                status: status,
+                plannerTaskID: plannerTaskID
             )
         }
     }
 
     /// Persists the running draft (Start): locked text plus the initial
     /// ordered category snapshot and the (empty-at-start) notes snapshot.
-    /// The singleton row is upserted; any prior draft is replaced.
+    /// The singleton row is upserted; any prior draft is replaced — except
+    /// the planner link, which a nil `plannerTaskID` preserves instead of
+    /// clearing, so ordinary rewrites (mid-run retag, relaunch) never
+    /// detach a linked run. Only the draft delete on Stop clears the link.
+    /// The boundary-guarded claim path is `claimTimerDraft`.
     func saveTimerDraft(
         activityText: String,
         categoryIDs: [String],
         startedAt: Date,
-        notes: String = ""
+        notes: String = "",
+        plannerTaskID: String? = nil
     ) throws {
         let trimmed = ActivityName.normalized(activityText)
         let joined = Self.deduplicate(categoryIDs).joined(separator: ",")
         try queue.write { db in
             try db.execute(
                 sql: """
-                    INSERT INTO timer_state (id, activity_text, category_ids, notes, started_at, status)
-                    VALUES ('singleton', ?, ?, ?, ?, 'running')
+                    INSERT INTO timer_state (id, activity_text, category_ids, notes, started_at, status, planner_task_id)
+                    VALUES ('singleton', ?, ?, ?, ?, 'running', ?)
                     ON CONFLICT(id) DO UPDATE SET
                         activity_text = excluded.activity_text,
                         category_ids = excluded.category_ids,
                         notes = excluded.notes,
                         started_at = excluded.started_at,
+                        planner_task_id = COALESCE(excluded.planner_task_id, timer_state.planner_task_id),
                         status = 'running'
                     """,
-                arguments: [trimmed, joined, notes, startedAt]
+                arguments: [trimmed, joined, notes, startedAt, plannerTaskID]
             )
         }
     }
@@ -1817,7 +1965,7 @@ actor LocalStore {
     /// relay deletes a record the user just restored with no outbox row left
     /// to repair the divergence. `LocalStore` is an actor, so plain stored
     /// state is already serialized — no extra lock needed.
-    private var undoPushInFlight = false
+    var undoPushInFlight = false
 
     /// Marks the start/end of a buffered-deletion push loop. While set,
     /// `undoBufferRestore`, `undoEntryDeletion`, and `undoCategoryDeletion`
@@ -1960,6 +2108,15 @@ actor LocalStore {
                         arguments: [entry.id, categoryID, index]
                     )
                 }
+            case plannerResource:
+                let task = try JSONDecoder().decode(PlannerTask.self, from: record.data)
+                try db.execute(
+                    sql: """
+                        INSERT OR IGNORE INTO planner_tasks (id, name, category_ids, notes, position_key, completed_on, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                    arguments: [task.id, task.name, Self.joinPlannerCategoryIDs(task.categoryIDs), task.notes, task.positionKey, task.completedOn, task.createdAt, task.updatedAt]
+                )
             default:
                 break
             }
@@ -1970,14 +2127,16 @@ actor LocalStore {
 
     /// Which deletion owns a buffer payload (unify-catalog-deletion D10).
     /// Ownership is exclusive and deterministic — category wins over entry
-    /// (the `category_associations` pseudo-record never owns a row alone).
-    /// Every typed decoder and undo below honors only rows owned by its own
-    /// resource, so no surface can claim or shred another surface's buffered
+    /// (the `category_associations` pseudo-record never owns a row alone),
+    /// and planner rows belong to the planner surface alone. Every typed
+    /// decoder and undo below honors only rows owned by its own resource,
+    /// so no surface can claim or shred another surface's buffered
     /// deletion.
-    private static func owner(of snapshot: DeletionSnapshot) -> String? {
+    static func owner(of snapshot: DeletionSnapshot) -> String? {
         let resources = Set(snapshot.records.map(\.resource))
         if resources.contains("category") { return "category" }
         if resources.contains("entry") { return "entry" }
+        if resources.contains(plannerResource) { return plannerResource }
         return nil
     }
 
@@ -2428,7 +2587,7 @@ actor LocalStore {
 
     /// The transactional outbox chokepoint: every mutation writes its outbox
     /// row in the same transaction as the state change (D2).
-    private static func enqueueOutbox(
+    static func enqueueOutbox(
         db: Database,
         resource: String,
         recordID: String,
@@ -2466,6 +2625,30 @@ struct RunningTimerDraft: Codable, Equatable, Sendable {
     var notes: String
     var startedAt: Date?
     var status: String
+    /// The one-tap Start link (day-planner D3): the exact task an atomic
+    /// Stop completes; nil for ordinary runs and pre-planner drafts.
+    var plannerTaskID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case activityText, categoryIDs, notes, startedAt, status
+        case plannerTaskID = "planner_task_id"
+    }
+
+    init(
+        activityText: String,
+        categoryIDs: [String],
+        notes: String,
+        startedAt: Date?,
+        status: String,
+        plannerTaskID: String? = nil
+    ) {
+        self.activityText = activityText
+        self.categoryIDs = categoryIDs
+        self.notes = notes
+        self.startedAt = startedAt
+        self.status = status
+        self.plannerTaskID = plannerTaskID
+    }
 }
 
 /// GRDB record for the transactional outbox (D2).

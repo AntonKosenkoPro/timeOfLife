@@ -208,7 +208,6 @@
 "entry.dismissLabel" = "Close";
 "entry.confirmAddLabel" = "Add entry";
 "entry.confirmSaveLabel" = "Save entry";
-"entry.delete" = "Delete entry";
 "entry.deleteTitle" = "Delete this entry?";
 "entry.deleteMessage" = "This entry will be deleted. You can shake to undo.";
 "entry.deleteConfirm" = "Delete";
@@ -349,3 +348,19 @@
 "catalogIcon.stethoscope" = "Stethoscope";
 "catalogIcon.pill" = "Pill";
 "catalogIcon.tag" = "Tag";
+
+// Day planner (add-day-planner)
+"planner.title" = "My Day";
+"planner.progressLabel" = "Done %1$d of %2$d";
+"planner.emptyHint" = "Tasks you add show up here until done.";
+"planner.inProgress" = "In progress";
+"planner.composerPlaceholder" = "Add a task";
+"planner.add" = "Add";
+"planner.editorTitle" = "Edit task";
+"planner.save" = "Save";
+"planner.markDone" = "Mark done";
+"planner.reopen" = "Reopen";
+"planner.noMatch" = "No matches";
+"planner.reorder" = "Reorder";
+"planner.blockedStart" = "You can't start a task while another is running";
+"planner.deleteRunning" = "You can't delete the running task";

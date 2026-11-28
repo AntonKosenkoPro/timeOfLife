@@ -14,15 +14,21 @@ import LifioLiveActivityCore
 final class TimerService: ObservableObject {
     let store: LocalStore
     private let liveActivities: LiveActivityControlling
+    /// Notification surface for the linked-stop commit event (day-planner
+    /// 14.2). Production uses `.default`; tests inject a private center so
+    /// global posts from parallel suites cannot reload VMs under test.
+    private let notifications: NotificationCenter
 
     init(
         store: LocalStore,
         liveActivities: LiveActivityControlling = LiveActivityService {
             UIApplication.shared.applicationState == .active
-        }
+        },
+        notifications: NotificationCenter = .default
     ) {
         self.store = store
         self.liveActivities = liveActivities
+        self.notifications = notifications
     }
 
     /// Starts (or rewrites) the persisted running draft for the given
@@ -33,8 +39,12 @@ final class TimerService: ObservableObject {
     /// Also mirrors the run on the Live Activity (live-activities spec):
     /// the singleton guard inside makes rewrites (mid-run retags, crash
     /// relaunches with the same text) safe no-ops.
-    func startTimerDraft(text: String, categoryIDs: [String], notes: String = "", startedAt: Date = Date()) async throws {
-        try await store.saveTimerDraft(activityText: text, categoryIDs: categoryIDs, startedAt: startedAt, notes: notes)
+    ///
+    /// `plannerTaskID` carries a one-tap Start link (day-planner D3); nil
+    /// (the ordinary path) preserves an existing link instead of clearing
+    /// it, so mid-run rewrites never detach a linked run.
+    func startTimerDraft(text: String, categoryIDs: [String], notes: String = "", startedAt: Date = Date(), plannerTaskID: String? = nil) async throws {
+        try await store.saveTimerDraft(activityText: text, categoryIDs: categoryIDs, startedAt: startedAt, notes: notes, plannerTaskID: plannerTaskID)
         await liveActivities.runStarted(
             text: text,
             iconSymbol: firstIconSymbol(for: categoryIDs),
@@ -44,11 +54,71 @@ final class TimerService: ObservableObject {
         BackgroundReapScheduler.scheduleReapCheck()
     }
 
+    /// Starts a planner task in one tap (day-planner D4): atomically claims
+    /// the running draft for the task, or reports false when a run is
+    /// already active, pending, or awaiting a Stop retry — a second Start
+    /// never replaces anything at the mutation boundary. The caller stays
+    /// usable (no navigation, no error banner) on false; only a real
+    /// persistence failure throws. The task's name, ordered categories, and
+    /// notes are copied into the draft (day-planner §15).
+    func startLinkedTask(name: String, categoryIDs: [String], notes: String, taskID: String, startedAt: Date) async throws -> Bool {
+        let claimed = try await store.claimTimerDraft(
+            activityText: name,
+            categoryIDs: categoryIDs,
+            startedAt: startedAt,
+            notes: notes,
+            plannerTaskID: taskID
+        )
+        guard claimed else { return false }
+        await liveActivities.runStarted(
+            text: ActivityName.normalized(name),
+            iconSymbol: firstIconSymbol(for: categoryIDs),
+            startedAt: startedAt,
+            categoryChips: categoryChips(for: categoryIDs)
+        )
+        BackgroundReapScheduler.scheduleReapCheck()
+        return true
+    }
+
+    /// Rewrites the running draft's live category snapshot (a mid-run
+    /// retag) and — when the run is linked to a planner task — the task's
+    /// ordered set in the same chokepoint transaction with the single
+    /// `retag` outbox row (day-planner 15.2, Track→task direction). The
+    /// locked text, notes, and `started_at` are untouched; no draft-sync
+    /// row is queued. The Live Activity chips re-mirror from the new set
+    /// (mid-run retag refreshes chips in place). A linked run posts the
+    /// task-converged event so the planner snapshot refreshes in place
+    /// (day-planner 16.4); unlinked runs converge no task and post nothing.
+    func retagRunningDraft(_ categoryIDs: [String]) async throws {
+        let linked = try await store.timerDraft()?.plannerTaskID != nil
+        try await store.updateRunningDraftCategories(categoryIDs, operationID: await store.newRecordID())
+        // Posted before the re-mirror (which needs a start anchor the
+        // store write never requires): the task already converged above.
+        if linked {
+            notifications.post(name: .plannerTaskConverged, object: nil)
+        }
+        guard let draft = try await store.timerDraft(), let startedAt = draft.startedAt else { return }
+        await liveActivities.runStarted(
+            text: draft.activityText,
+            iconSymbol: firstIconSymbol(for: draft.categoryIDs),
+            startedAt: startedAt,
+            categoryChips: categoryChips(for: draft.categoryIDs)
+        )
+    }
+
     /// Rewrites only the persisted running draft's live notes snapshot (a
-    /// mid-run notes save). The locked text, categories, and `started_at`
-    /// are untouched.
+    /// mid-run notes save) and — when the run is linked to a planner task —
+    /// the task's notes in the same chokepoint transaction with the single
+    /// `notes` outbox row (day-planner 15.2, Track→task direction). The
+    /// locked text, categories, and `started_at` are untouched. A linked
+    /// run posts the task-converged event so the planner snapshot refreshes
+    /// in place (day-planner 16.4); unlinked runs post nothing.
     func updateTimerDraftNotes(_ notes: String) async throws {
-        try await store.updateTimerDraftNotes(notes)
+        let linked = try await store.timerDraft()?.plannerTaskID != nil
+        try await store.updateRunningDraftNotes(notes, operationID: await store.newRecordID())
+        if linked {
+            notifications.post(name: .plannerTaskConverged, object: nil)
+        }
     }
 
     /// Rewrites only the persisted draft's start time (a mid-run backdate)
@@ -158,6 +228,20 @@ final class TimerService: ObservableObject {
         } else {
             stopEntryID = await store.newRecordID()
         }
+        // The planner link rides the persisted draft (day-planner D3): when
+        // the stopping run started from a task, the same transaction saves
+        // the entry and completes exactly that task. Ordinary runs carry no
+        // link and stop exactly as before.
+        let plannerLink: LocalStore.PlannerStopLink?
+        if let taskID = try await store.timerDraft()?.plannerTaskID {
+            plannerLink = LocalStore.PlannerStopLink(
+                taskID: taskID,
+                operationID: await store.newRecordID(),
+                completedOn: PlannerCivilDate.today()
+            )
+        } else {
+            plannerLink = nil
+        }
         let entry = TimeEntry(
             id: stopEntryID,
             activityText: text,
@@ -167,9 +251,16 @@ final class TimerService: ObservableObject {
             categoryIDs: pruned,
             notes: notes
         )
-        let mutation = try await store.stopRunningTimer(entry)
+        let mutation = try await store.stopRunningTimer(entry, plannerLink: plannerLink)
         guard case let .created(saved) = mutation else {
             throw StopError.notCompleted
+        }
+        // A linked Stop may have completed the planner task in the same
+        // transaction: tell the planner projection to reload so the Track
+        // progress control refreshes in place (day-planner 14.2). Ordinary
+        // stops carry no link and post nothing.
+        if plannerLink != nil {
+            notifications.post(name: .plannerLinkedStopCommitted, object: nil)
         }
         await liveActivities.runEnded(startedAt: startedAt, durationSeconds: durationSeconds)
         BackgroundReapScheduler.cancelReapCheck()

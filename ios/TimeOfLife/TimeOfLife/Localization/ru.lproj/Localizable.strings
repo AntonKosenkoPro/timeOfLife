@@ -208,7 +208,6 @@
 "entry.dismissLabel" = "Закрыть";
 "entry.confirmAddLabel" = "Добавить запись";
 "entry.confirmSaveLabel" = "Сохранить запись";
-"entry.delete" = "Удалить запись";
 "entry.deleteTitle" = "Удалить эту запись?";
 "entry.deleteMessage" = "Запись будет удалена. Отменить можно встряской.";
 "entry.deleteConfirm" = "Удалить";
@@ -349,3 +348,19 @@
 "catalogIcon.stethoscope" = "Стетоскоп";
 "catalogIcon.pill" = "Таблетка";
 "catalogIcon.tag" = "Тег";
+
+// Day planner (add-day-planner)
+"planner.title" = "Мой день";
+"planner.progressLabel" = "Готово %1$d из %2$d";
+"planner.emptyHint" = "Добавленные задачи будут здесь, пока не выполните их.";
+"planner.inProgress" = "В процессе";
+"planner.composerPlaceholder" = "Добавить задачу";
+"planner.add" = "Добавить";
+"planner.editorTitle" = "Изменить задачу";
+"planner.save" = "Сохранить";
+"planner.markDone" = "Отметить выполненной";
+"planner.reopen" = "Вернуть";
+"planner.noMatch" = "Нет совпадений";
+"planner.reorder" = "Изменить порядок";
+"planner.blockedStart" = "Нельзя начать задачу, пока идёт другая";
+"planner.deleteRunning" = "Нельзя удалить выполняющуюся задачу";

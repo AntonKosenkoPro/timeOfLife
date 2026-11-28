@@ -161,7 +161,6 @@ enum L10n: String, CaseIterable {
     case entryDismissLabel = "entry.dismissLabel"
     case entryConfirmAddLabel = "entry.confirmAddLabel"
     case entryConfirmSaveLabel = "entry.confirmSaveLabel"
-    case entryDelete = "entry.delete"
     case entryDeleteTitle = "entry.deleteTitle"
     case entryDeleteMessage = "entry.deleteMessage"
     case entryDeleteConfirm = "entry.deleteConfirm"
@@ -204,6 +203,22 @@ enum L10n: String, CaseIterable {
     case categorySeedSleep = "category.seed.sleep"
     case categorySeedEntertainment = "category.seed.entertainment"
     case categorySeedFood = "category.seed.food"
+
+    // Day planner (add-day-planner)
+    case plannerTitle = "planner.title"
+    case plannerProgressLabel = "planner.progressLabel"
+    case plannerEmptyHint = "planner.emptyHint"
+    case plannerComposerPlaceholder = "planner.composerPlaceholder"
+    case plannerAdd = "planner.add"
+    case plannerEditorTitle = "planner.editorTitle"
+    case plannerSave = "planner.save"
+    case plannerMarkDone = "planner.markDone"
+    case plannerReopen = "planner.reopen"
+    case plannerNoMatch = "planner.noMatch"
+    case plannerBlockedStart = "planner.blockedStart"
+    case plannerDeleteRunning = "planner.deleteRunning"
+    case plannerInProgress = "planner.inProgress"
+    case plannerReorder = "planner.reorder"
 
     // Undo (chip selection accessibility; the category UndoToast is gone —
     // deletions undo through the system Undo confirmation instead)

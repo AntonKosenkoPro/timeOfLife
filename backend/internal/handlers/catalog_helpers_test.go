@@ -82,6 +82,8 @@ func catalogRouter(h *Handler) http.Handler {
 			r.Patch("/entries/{id}", h.UpdateEntry)
 			r.Delete("/entries/{id}", h.DeleteEntry)
 			r.Get("/deletions", h.ListDeletions)
+			r.Post("/planner/operations", h.ApplyPlannerOperation)
+			r.Get("/planner/feed", h.ListPlannerFeed)
 		})
 	})
 	return r

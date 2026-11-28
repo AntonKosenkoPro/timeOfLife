@@ -205,7 +205,6 @@
 "entry.dismissLabel" = "关闭";
 "entry.confirmAddLabel" = "添加条目";
 "entry.confirmSaveLabel" = "存储条目";
-"entry.delete" = "删除条目";
 "entry.deleteTitle" = "确定要删除此条目吗？";
 "entry.deleteMessage" = "该条目将被删除，可摇动设备撤销。";
 "entry.deleteConfirm" = "删除";
@@ -347,3 +346,19 @@
 "catalogIcon.pill" = "药片";
 "catalogIcon.tag" = "标签";
 "profile.versionInternalSuffix" = "Internal";
+
+// Day planner (add-day-planner)
+"planner.title" = "我的一天";
+"planner.progressLabel" = "已完成 %1$d，共 %2$d";
+"planner.emptyHint" = "添加的任务会显示在这里，直到完成。";
+"planner.inProgress" = "进行中";
+"planner.composerPlaceholder" = "添加任务";
+"planner.add" = "添加";
+"planner.editorTitle" = "编辑任务";
+"planner.save" = "保存";
+"planner.markDone" = "标记为已完成";
+"planner.reopen" = "重新打开";
+"planner.noMatch" = "无匹配项";
+"planner.reorder" = "重新排序";
+"planner.blockedStart" = "已有任务在进行，无法开始";
+"planner.deleteRunning" = "无法删除正在进行的任务";

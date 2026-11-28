@@ -53,6 +53,17 @@ final class TrackViewModel: ObservableObject {
     /// publish nothing, so no-op sync cycles render literally nothing
     /// (steady-track-launch).
     private var lastSnapshot: TrackSnapshot?
+    /// Notification surface for the sheet-converged draft reload
+    /// (day-planner 15.2). Production uses `.default`; tests inject a
+    /// private center so global posts cannot reload VMs under test.
+    private let notifications: NotificationCenter
+    /// Event-driven reload for sheet-converged drafts (day-planner 15.2):
+    /// the editor sheet converged the linked run behind this view model,
+    /// so the posted event invalidates the stale in-memory snapshot and
+    /// the guarded reload republishes the converged tags and notes.
+    /// Subscribed here — not in the view — so the path is unit-testable
+    /// (History/planner precedent).
+    private var draftConvergedCancellables = Set<AnyCancellable>()
     /// Whether a first snapshot has been applied (preloaded adoption or a
     /// completed load, success or failure alike). Gates the name row until
     /// the screen has something true to show.
@@ -132,12 +143,15 @@ final class TrackViewModel: ObservableObject {
         service: TimerService,
         connectivity: Connectivity,
         now: @escaping () -> Date = Date.init,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        notifications: NotificationCenter = .default
     ) {
         self.service = service
         self.connectivity = connectivity
         self.nowProvider = now
         self.calendar = calendar
+        self.notifications = notifications
+        observeDraftConvergence()
     }
 
     /// App-owned now for views (the Started caption, the start editor): the
@@ -330,6 +344,18 @@ final class TrackViewModel: ObservableObject {
         needsReload = true
     }
 
+    /// Subscribes the sheet-converged draft reload (day-planner 15.2).
+    private func observeDraftConvergence() {
+        notifications.publisher(for: .plannerDraftConverged)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.invalidate()
+                    await self?.loadIfNeeded()
+                }
+            }
+            .store(in: &draftConvergedCancellables)
+    }
+
     private func storeRecents() async throws -> [ExactName] {
         try await service.store.recents(limit: Self.recentsLimit)
             .map(ExactName.init(storeRecent:))
@@ -474,7 +500,9 @@ final class TrackViewModel: ObservableObject {
     }
 
     /// Toggles a category on the running draft (D4): rewrites only the
-    /// running draft snapshot — never an entry, history row, or recents.
+    /// running draft snapshot — never an entry, history row, or recents —
+    /// and, when the run is linked to a planner task, converges the task's
+    /// ordered set in the same chokepoint transaction (day-planner 15.2).
     func toggleDraftCategory(_ categoryID: String) {
         guard case let .running(draft, startedAt) = state else { return }
         var updated = draft
@@ -485,12 +513,7 @@ final class TrackViewModel: ObservableObject {
         }
         state = .running(updated, startedAt: startedAt)
         Task {
-            try? await service.startTimerDraft(
-                text: updated.text,
-                categoryIDs: updated.categoryIDs,
-                notes: updated.notes,
-                startedAt: startedAt
-            )
+            try? await service.retagRunningDraft(updated.categoryIDs)
         }
     }
 
@@ -515,7 +538,8 @@ final class TrackViewModel: ObservableObject {
     }
 
     /// Appends an id to a held draft and persists the snapshot, rewrapped
-    /// into the state it came from.
+    /// into the state it came from. A linked run converges the task's set
+    /// in the same chokepoint transaction (day-planner 15.2).
     private func attachToDraft(
         _ categoryID: String,
         draft: TrackState.Draft,
@@ -527,12 +551,7 @@ final class TrackViewModel: ObservableObject {
         updated.categoryIDs.append(categoryID)
         state = rewrap(updated, startedAt)
         Task {
-            try? await service.startTimerDraft(
-                text: updated.text,
-                categoryIDs: updated.categoryIDs,
-                notes: updated.notes,
-                startedAt: startedAt
-            )
+            try? await service.retagRunningDraft(updated.categoryIDs)
         }
     }
 

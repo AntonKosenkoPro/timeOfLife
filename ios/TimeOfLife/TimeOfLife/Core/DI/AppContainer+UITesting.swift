@@ -90,6 +90,10 @@ extension AppContainer {
         seedHistoryIfNeeded(screen: screen, localStore: localStore)
         seedHistorySearchIfNeeded(screen: screen, localStore: localStore)
         seedTrackCategoriesIfNeeded(screen: screen, localStore: localStore)
+        seedPlannerHeadersIfNeeded(screen: screen, localStore: localStore)
+        seedPlannerWarmIfNeeded(screen: screen, localStore: localStore)
+        seedPlannerNotesIfNeeded(screen: screen, localStore: localStore)
+        seedPlannerLongIfNeeded(screen: screen, localStore: localStore)
         seedZhFitIfNeeded(screen: screen, localStore: localStore)
         seedDeletionEvidence(keychain: keychain)
     }
@@ -98,6 +102,15 @@ extension AppContainer {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
             .appendingPathComponent(LocalStore.databaseFileName(userID: userID))
+    }
+
+    /// The signed-in shell with an empty navigation path (the stub Track
+    /// root shared by the planner probes; seeding is per-screen).
+    private static func signInShell(sessionStore: SessionStore, navigation: AppNavigationStack) {
+        sessionStore.setSignedIn(CachedSession(
+            id: "ui-test", email: "user@example.com", emailVerified: true
+        ))
+        navigation.path = []
     }
 
     /// Places the app on a specific screen for inspection.
@@ -128,6 +141,24 @@ extension AppContainer {
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
             navigation.path = []
+        case "plannerHeaders":
+            // Day-planner header/stillness probe (add-day-planner §6): the
+            // signed-in shell plus one committed entry, so Today shows a
+            // chip for the "Header" prefix in the chips line. Seeded entry
+            // text is fixture copy, never user data.
+            sessionStore.setSignedIn(CachedSession(
+                id: "ui-test", email: "user@example.com", emailVerified: true
+            ))
+            navigation.path = []
+        case "plannerWarm", "plannerNotes", "plannerLong":
+            // Day-planner probes on the signed-in shell; seeding is
+            // per-screen (`seedPlannerWarmIfNeeded` plants §12's three
+            // tasks for "plannerWarm"; `seedPlannerNotesIfNeeded` plants
+            // §15's tagged + annotated pair for "plannerNotes";
+            // `seedPlannerLongIfNeeded` plants §24's fifteen open tasks
+            // for "plannerLong"). Seeded text is fixture copy, never user
+            // data.
+            signInShell(sessionStore: sessionStore, navigation: navigation)
         case "trackCategories":
             // Deterministic running-track fixture: the shell opens on Track
             // with a running draft (see `seedTrackCategoriesIfNeeded`).
@@ -227,6 +258,155 @@ extension AppContainer {
     private static func seedHistorySearchIfNeeded(screen: String, localStore: LocalStore) {
         guard screen == "historySearch" else { return }
         Task { await seedHistorySearchEntries(into: localStore) }
+    }
+
+    /// Two open tasks plus one completed today for the `"plannerWarm"`
+    /// screen (day-planner §12 probe): the Today projection carries actual
+    /// counts ("1 of 3") from the first paint. Same degrade-to-empty
+    /// policy as the History seeds: a failed seed leaves Today empty, and
+    /// the probe fails loudly on the wrong counts instead of guessing.
+    private static func seedPlannerWarmIfNeeded(screen: String, localStore: LocalStore) {
+        guard screen == "plannerWarm" else { return }
+        Task {
+            do {
+                for (id, name, key) in [
+                    ("uitest-warm-alpha", "Warm Alpha", "500000"),
+                    ("uitest-warm-beta", "Warm Beta", "500001"),
+                    ("uitest-warm-gamma", "Warm Gamma", "500002"),
+                ] as [(String, String, String)] {
+                    let result = try await localStore.createPlannerTask(
+                        id: id, name: name, positionKey: key,
+                        operationID: UUID().uuidString
+                    )
+                    guard case .saved = result else {
+                        seedLogger.error("UITest seed: plannerWarm task failed: \(name, privacy: .public)")
+                        return
+                    }
+                }
+                let completed = try await localStore.completePlannerTask(
+                    id: "uitest-warm-gamma", completedOn: PlannerCivilDate.today(),
+                    operationID: UUID().uuidString
+                )
+                guard case .saved = completed else {
+                    seedLogger.error("UITest seed: plannerWarm completion failed")
+                    return
+                }
+            } catch {
+                seedLogger.error("UITest seed: plannerWarm threw: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Fifteen open tasks for the `"plannerLong"` screen (day-planner §24
+    /// drag-dismiss probe): a scrollable Today list, so a real drag scrolls
+    /// and the scroll-view dismiss fires. Same degrade-to-empty policy as
+    /// the History seeds: a failed seed leaves Today short, and the probe
+    /// fails loudly on the wrong counts instead of guessing.
+    private static func seedPlannerLongIfNeeded(screen: String, localStore: LocalStore) {
+        guard screen == "plannerLong" else { return }
+        Task {
+            do {
+                for i in 1...15 {
+                    let name = String(format: "Long %02d", i)
+                    let result = try await localStore.createPlannerTask(
+                        id: "uitest-long-\(i)", name: name,
+                        positionKey: String(format: "61%04d", i),
+                        operationID: UUID().uuidString
+                    )
+                    guard case .saved = result else {
+                        seedLogger.error("UITest seed: plannerLong task failed: \(name, privacy: .public)")
+                        return
+                    }
+                }
+            } catch {
+                seedLogger.error("UITest seed: plannerLong threw: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// One tagged + annotated task and one bare task for the
+    /// `"plannerNotes"` screen (day-planner §15 probe): "Note Alpha"
+    /// carries the "Desk Work" set and a seeded note, "Note Beta" is bare
+    /// (the probe Starts it for the linked run). The category id is fixed
+    /// so the probe can address its Track chip by identifier. Same
+    /// degrade-to-probe-failure policy as the other seeds.
+    private static func seedPlannerNotesIfNeeded(screen: String, localStore: LocalStore) {
+        guard screen == "plannerNotes" else { return }
+        Task {
+            do {
+                let workID: String
+                if let existing = try await localStore.category(named: "Desk Work") {
+                    workID = existing.id
+                } else {
+                    workID = "uitest-note-work"
+                    do {
+                        try await localStore.createCategory(Category(
+                            id: workID, name: "Desk Work", icon: "briefcase"
+                        ))
+                    } catch {
+                        seedLogger.error("UITest seed: plannerNotes category failed: \(error.localizedDescription, privacy: .public)")
+                        return
+                    }
+                }
+                for (id, name, key) in [
+                    ("uitest-note-alpha", "Note Alpha", "500000"),
+                    ("uitest-note-beta", "Note Beta", "500001"),
+                ] as [(String, String, String)] {
+                    let result = try await localStore.createPlannerTask(
+                        id: id, name: name, positionKey: key,
+                        operationID: UUID().uuidString
+                    )
+                    guard case .saved = result else {
+                        seedLogger.error("UITest seed: plannerNotes task failed: \(name, privacy: .public)")
+                        return
+                    }
+                }
+                guard case .saved = try await localStore.retagPlannerTask(
+                    id: "uitest-note-alpha", categoryIDs: [workID],
+                    operationID: UUID().uuidString
+                ) else {
+                    seedLogger.error("UITest seed: plannerNotes retag failed")
+                    return
+                }
+                guard case .saved = try await localStore.setPlannerTaskNotes(
+                    id: "uitest-note-alpha", notes: "seeded note",
+                    operationID: UUID().uuidString
+                ) else {
+                    seedLogger.error("UITest seed: plannerNotes notes failed")
+                    return
+                }
+            } catch {
+                seedLogger.error("UITest seed: plannerNotes threw: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// One committed entry for the `"plannerHeaders"` screen, so a "Header"
+    /// draft shows a chip in the chips line between the composer and the
+    /// keyboard. Same degrade-to-empty policy as the History seeds: a
+    /// failed seed leaves Today without chips, and the probe fails loudly
+    /// on the missing chip instead of guessing.
+    private static func seedPlannerHeadersIfNeeded(screen: String, localStore: LocalStore) {
+        guard screen == "plannerHeaders" else { return }
+        Task {
+            let calendar = Calendar(identifier: .gregorian)
+            let todayStart = calendar.startOfDay(for: Date())
+            let entry = TimeEntry(
+                id: "uitest-planner-suggestion",
+                activityText: "Header probe",
+                startedAt: calendar.date(byAdding: .minute, value: 600, to: todayStart)!,
+                endedAt: calendar.date(byAdding: .minute, value: 630, to: todayStart)!,
+                durationSeconds: 1800
+            )
+            do {
+                let result = try await localStore.createEntry(entry)
+                if case .failure = result {
+                    seedLogger.error("UITest seed: plannerHeaders entry failed")
+                }
+            } catch {
+                seedLogger.error("UITest seed: plannerHeaders entry threw: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     private static func seedHistorySearchEntries(into store: LocalStore) async {

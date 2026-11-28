@@ -339,4 +339,27 @@ extension Notification.Name {
     /// tracker surfaces reload so no stale running state survives
     /// (live-activities D8; event-driven reload owned by remove-compact-timer).
     static let timerStoppedExternally = Notification.Name("timerStoppedExternally")
+
+    /// Posted (in-process) after a linked Stop commits (day-planner 14.2):
+    /// the run started from a planner task, so the Today projection may
+    /// have changed. The planner view model observes this and reloads, so
+    /// the Track progress control refreshes in place with no navigation.
+    /// Ordinary stops carry no link and post nothing.
+    static let plannerLinkedStopCommitted = Notification.Name("plannerLinkedStopCommitted")
+
+    /// Posted (in-process) after an editor-sheet save converges a linked
+    /// run's draft in the same chokepoint transaction (day-planner 15.2):
+    /// the running draft's live categories/notes changed behind the Track
+    /// view model, so Track observes this and reloads, converging its
+    /// in-memory snapshot (tags, notes editor baseline) with no
+    /// navigation. Unlinked saves post nothing.
+    static let plannerDraftConverged = Notification.Name("plannerDraftConverged")
+
+    /// Posted (in-process) after a Track-side retag or notes save converges
+    /// its linked planner task in the same chokepoint transaction
+    /// (day-planner 16.4): the task's ordered set or notes changed behind
+    /// the planner view model, so the planner observes this and reloads,
+    /// refreshing its snapshot in place with no navigation. Unlinked runs
+    /// converge no task and post nothing.
+    static let plannerTaskConverged = Notification.Name("plannerTaskConverged")
 }

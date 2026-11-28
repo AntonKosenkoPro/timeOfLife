@@ -662,7 +662,12 @@ struct TrackViewModelTests {
     @Test("attaching in the error state appends to the held draft")
     func attachCreatedCategoryWhileError() async {
         let vm = makeViewModel()
-        vm.state = .error(TrackState.Draft(text: "Reading"), startedAt: Date())
+        // Seeded explicitly (the toggle persist is fire-and-forget, and a
+        // genuine error state always holds a persisted draft — only the
+        // stop-failure path enters `.error`, and Stop never clears it).
+        let startedAt = Date()
+        try? await vm.service.store.saveTimerDraft(activityText: "Reading", categoryIDs: [], startedAt: startedAt)
+        vm.state = .error(TrackState.Draft(text: "Reading"), startedAt: startedAt)
         vm.attachCreatedCategory(Category(id: "c1", name: "Garden", icon: "leaf"))
         guard case let .error(draft, _) = vm.state else {
             Issue.record("expected error state")

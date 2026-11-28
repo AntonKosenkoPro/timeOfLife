@@ -257,53 +257,22 @@ struct LogTimeView: View {
     // MARK: - Name row
 
     @ViewBuilder private var nameCard: some View {
-        // Full-card push: the link owns the padded chrome (mirrors
-        // FormCard) so caption, chevron, value, blank, and padding
-        // all push. No tap-away here — it would consume those taps.
-        // No resign (issue #67): focus transfers to the picker with
-        // no keyboard flicker.
-        NavigationLink {
-            NamePicker(
-                initialText: vm.name,
-                recents: vm.nameRecents,
-                categories: Dictionary(uniqueKeysWithValues: vm.availableCategories.map { ($0.id, $0) }),
-                placeholder: L10n.entryNamePlaceholder.text,
-                emptyHint: L10n.timerRecentsEmptyHint.text,
-                onCompleteSuggestion: {
-                    vm.applySuggestion(text: $0.text, categoryIDs: $0.categoryIDs)
-                },
-                onCompleteText: { vm.completeTypedName($0) }
-            )
-        } label: {
-                VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-                    HStack(spacing: Theme.spacingSmall) {
-                        Text(L10n.entryNameLabel.text)
-                            .font(.caption)
-                            .foregroundStyle(Theme.textSecondary)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Theme.textSecondary)
-                            .accessibilityHidden(true)
-                    }
-                    Text(vm.name.isEmpty ? L10n.entryNamePlaceholder.text : vm.name)
-                        .font(.body)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .foregroundStyle(vm.name.isEmpty ? Theme.textSecondary : Theme.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .frame(minHeight: Theme.minTapArea)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(Theme.spacingMedium)
-                .background(Theme.backgroundSecondary)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-                .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        }
-        .buttonStyle(.plain)
-            .accessibilityLabel(L10n.entryNameLabel.text)
-            .accessibilityValue(vm.name)
-            .accessibilityIdentifier("EntryNameRow")
+        // The shared Name entry card (one component, never a copy): the
+        // full-card push row into `NamePicker`. Completion and validation
+        // stay caller-owned (see `LogTimeViewModel.applySuggestion` /
+        // `completeTypedName`).
+        EntryNameCard(
+            value: vm.name,
+            placeholder: L10n.entryNamePlaceholder.text,
+            recents: vm.nameRecents,
+            categories: Dictionary(uniqueKeysWithValues: vm.availableCategories.map { ($0.id, $0) }),
+            emptyHint: L10n.timerRecentsEmptyHint.text,
+            accessibilityID: "EntryNameRow",
+            onCompleteSuggestion: {
+                vm.applySuggestion(text: $0.text, categoryIDs: $0.categoryIDs)
+            },
+            onCompleteText: { vm.completeTypedName($0) }
+        )
     }
 
     // MARK: - Categories row
@@ -382,10 +351,13 @@ struct LogTimeView: View {
 
     // MARK: - Delete
 
-    /// Bottom-of-page destructive Delete (EDIT mode only).
+    /// Bottom-of-page destructive Delete (EDIT mode only): the plain
+    /// `Delete` control shared with the planner task editor sheet
+    /// (day-planner 19.3, HIG destructive wording — the former `Delete
+    /// entry` title diverged from it).
     private var deleteSection: some View {
         DestructiveBottomButton(
-            title: L10n.entryDelete.text,
+            title: L10n.entryDeleteConfirm.text,
             accessibilityId: "EntryDeleteButton"
         ) {
             isShowingDeleteConfirm = true

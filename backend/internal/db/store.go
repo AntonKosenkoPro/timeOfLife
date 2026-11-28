@@ -409,6 +409,22 @@ type Store interface {
 	// (nil/zero = all), ordered by deleted_at ASC.
 	ListDeletions(ctx context.Context, userID string, since *time.Time) ([]Tombstone, error)
 
+	// ApplyPlannerOperation applies one field-specific planner mutation,
+	// assigning the next commit-ordered per-account revision and recording
+	// the operation id receipt in the same transaction. Replaying an
+	// accepted operation id returns the stored task state with created=false
+	// and no new revision. A create for a live id under a different
+	// operation id returns the server task with ErrPlannerConflict; any
+	// operation on a deleted id returns ErrPlannerGone; a field operation
+	// on an unknown id returns ErrNotFound.
+	ApplyPlannerOperation(ctx context.Context, userID string, op PlannerOperation) (PlannerTask, bool, error)
+
+	// ListPlannerFeed returns the user's planner changes with revision in
+	// (afterRevision, watermark], ordered by revision ASC, plus the
+	// committed upper watermark fixed at read time and whether further
+	// pages remain below it. afterRevision=0 starts from the beginning.
+	ListPlannerFeed(ctx context.Context, userID string, afterRevision int64, limit int) (tasks []PlannerTask, watermark int64, hasMore bool, err error)
+
 	// SaveAppleCredential upserts the encrypted Apple revocable credential
 	// for an Apple user (same-subject deletion authorization). Never
 	// persists a plaintext token.

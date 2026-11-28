@@ -34,6 +34,14 @@ protocol CatalogSending: Sendable {
     func updateEntry(_ entry: TimeEntry) async throws
     /// `DELETE /entries/{id}`.
     func deleteEntry(id: String) async throws
+    /// `POST /api/v1/planner/operations` — one field-specific planner
+    /// mutation, idempotent on `operation_id`; terminal deletes answer 410
+    /// `planner_gone`, live-id creates under a new operation answer 409
+    /// `planner_conflict` (server task in details).
+    func applyPlannerOperation(_ op: PlannerOperationPayload) async throws
+    /// `GET /api/v1/planner/feed` — one revision-ordered page with its
+    /// committed watermark; `hasMore` ends the loop.
+    func fetchPlannerFeed(afterRevision: Int64, limit: Int) async throws -> PlannerFeedPage
 }
 
 /// `CatalogSending` backed by the shared `APIClient` (Bearer auth, refresh,
@@ -147,6 +155,29 @@ final class RemoteCatalogRepository: CatalogSending {
     func deleteEntry(id: String) async throws {
         try await client.sendVoid(
             APIEndpoint.value(method: .delete, path: "\(basePath)/entries/\(id)", requiresAuth: true)
+        )
+    }
+
+    func applyPlannerOperation(_ op: PlannerOperationPayload) async throws {
+        try await client.sendVoid(
+            APIEndpoint(method: .post, path: "\(basePath)/planner/operations",
+                        body: PlannerOperationBody(op: op), requiresAuth: true)
+        )
+    }
+
+    func fetchPlannerFeed(afterRevision: Int64, limit: Int) async throws -> PlannerFeedPage {
+        let response = try await client.send(
+            APIEndpoint.value(
+                method: .get,
+                path: "\(basePath)/planner/feed?after_revision=\(afterRevision)&limit=\(limit)",
+                requiresAuth: true
+            ),
+            as: PlannerFeedResponse.self
+        )
+        return PlannerFeedPage(
+            changes: response.changes.map(Self.localPlannerChange(from:)),
+            watermarkRevision: response.watermarkRevision,
+            hasMore: response.hasMore ?? false
         )
     }
 
@@ -473,5 +504,130 @@ struct EntryUpdateBody: Encodable, Sendable {
         self.startedAt = WireDate.format(entry.startedAt)
         self.endedAt = entry.endedAt.map(WireDate.format)
         self.updatedAt = WireDate.format(entry.updatedAt)
+    }
+}
+
+/// One page of the relay planner feed, in revision order.
+struct PlannerFeedPage: Sendable {
+    /// The page's changes in relay (revision) order.
+    var changes: [PlannerFeedChange]
+    /// Committed upper revision bound fixed when the page was read.
+    var watermarkRevision: Int64
+    /// Whether further pages remain below the watermark.
+    var hasMore: Bool
+}
+
+/// `POST /api/v1/planner/operations` body: the queued intent. Only the
+/// intent's field is populated (the relay ignores extras); a lost response
+/// is retried verbatim with the same `operation_id`.
+struct PlannerOperationBody: Encodable, Sendable {
+    var operationID: String
+    var taskID: String
+    var intent: String
+    var name: String?
+    var positionKey: String?
+    var completedOn: String?
+    var categoryIDs: [String]?
+    var notes: String?
+
+    enum CodingKeys: String, CodingKey {
+        case operationID = "operation_id"
+        case taskID = "task_id"
+        case intent, name
+        case positionKey = "position_key"
+        case completedOn = "completed_on"
+        case categoryIDs = "category_ids"
+        case notes
+    }
+
+    init(op: PlannerOperationPayload) {
+        operationID = op.operationID
+        taskID = op.taskID
+        intent = op.intent
+        name = op.name
+        positionKey = op.positionKey
+        completedOn = op.completedOn
+        categoryIDs = op.categoryIDs
+        notes = op.notes
+    }
+}
+
+/// `GET /api/v1/planner/feed` response envelope: revision-ordered changes
+/// with the committed watermark. The relay omits `has_more` on the last
+/// page, so a synthesized optional decode is the terminal condition.
+struct PlannerFeedResponse: Decodable, Sendable {
+    var changes: [PlannerTaskWireDTO]
+    var watermarkRevision: Int64
+    var hasMore: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case changes
+        case watermarkRevision = "watermark_revision"
+        case hasMore = "has_more"
+    }
+}
+
+/// The wire shape of a PlannerTask (OpenAPI `PlannerTask`): RFC 3339
+/// timestamps, a plain civil-date string (or null) for `completed_on`, the
+/// ordered `category_ids` set, the free-text `notes`, the commit-ordered
+/// `revision`, and the terminal `deleted` marker.
+struct PlannerTaskWireDTO: Decodable, Sendable {
+    var id: String
+    var name: String
+    var categoryIDs: [String]
+    var notes: String
+    var positionKey: String
+    var completedOn: String?
+    var revision: Int64
+    var createdAt: Date
+    var updatedAt: Date
+    var deleted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, notes, revision, deleted
+        case categoryIDs = "category_ids"
+        case positionKey = "position_key"
+        case completedOn = "completed_on"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        // Pre-§14 relays omit the set: default to empty instead of failing
+        // the feed decode (the retag intent re-converges it). Pre-§15
+        // relays omit notes the same way (the notes intent re-converges).
+        categoryIDs = try container.decodeIfPresent([String].self, forKey: .categoryIDs) ?? []
+        notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        positionKey = try container.decode(String.self, forKey: .positionKey)
+        // A civil date (`YYYY-MM-DD`) or null — a plain string, never an
+        // RFC 3339 timestamp, so no WireDate decoding applies.
+        completedOn = try container.decodeIfPresent(String.self, forKey: .completedOn)
+        revision = try container.decode(Int64.self, forKey: .revision)
+        createdAt = try WireDate.decode(container, forKey: .createdAt)
+        updatedAt = try WireDate.decode(container, forKey: .updatedAt)
+        deleted = try container.decode(Bool.self, forKey: .deleted)
+    }
+}
+
+extension RemoteCatalogRepository {
+    /// Maps the wire PlannerTask to the local feed change.
+    static func localPlannerChange(from dto: PlannerTaskWireDTO) -> PlannerFeedChange {
+        PlannerFeedChange(
+            task: PlannerTask(
+                id: dto.id,
+                name: dto.name,
+                positionKey: dto.positionKey,
+                completedOn: dto.completedOn,
+                categoryIDs: dto.categoryIDs,
+                notes: dto.notes,
+                createdAt: dto.createdAt,
+                updatedAt: dto.updatedAt
+            ),
+            deleted: dto.deleted,
+            revision: dto.revision
+        )
     }
 }

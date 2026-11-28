@@ -34,6 +34,15 @@ struct RootView: View {
     /// (preload failure) — the shell still mounts and `TrackViewModel`
     /// loads on appear with the recoverable error path.
     @State private var launchSnapshot: TrackSnapshot?
+    /// The gate-preloaded Today projection (timer-capture-experience
+    /// 12.3): set alongside `launchSnapshot` once bind, seed, and both
+    /// snapshot loads all succeed, so Track's progress control paints
+    /// actual counts on first paint instead of flashing 0/0 until the
+    /// first tab-return, foreground return, or sync-cycle exit reloads.
+    /// Nil when no snapshot was resolved (preload failure) — the shell
+    /// still mounts and `PlannerViewModel` loads on appear. Cleared with
+    /// `launchSnapshot` on sign-out.
+    @State private var launchPlannerSnapshot: PlannerToday.Preloaded?
     /// Auth-gate deletion state: the one-time pending-Apple-unlink notice
     /// (set when a submit completes with durable pending revocation) and the
     /// account id offered confirmed-cleanup retry after a post-purge local
@@ -141,7 +150,8 @@ struct RootView: View {
                 AppShellView(
                     vm: AppShellViewModel(),
                     container: container,
-                    trackSnapshot: launchSnapshot
+                    trackSnapshot: launchSnapshot,
+                    plannerSnapshot: launchPlannerSnapshot
                 )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -247,6 +257,10 @@ struct RootView: View {
             // `boundUserID` is set in the same MainActor turn, so the mount
             // never observes a half-prepared gate.
             launchSnapshot = try? await container.timerService.loadSnapshot(recentsLimit: TrackViewModel.recentsLimit)
+            // Same-step Today preload (timer-capture-experience 12.3):
+            // the progress control reads the planner snapshot directly,
+            // and nothing reloads it before first paint otherwise.
+            launchPlannerSnapshot = try? await PlannerViewModel.preload(store: container.localStore)
             if Task.isCancelled { return }
             guard case let .signedIn(current) = session.state, current.id == userID else { return }
             boundUserID = userID
@@ -312,6 +326,7 @@ struct RootView: View {
         container.navigation.resetTapRequests()
         boundUserID = nil
         launchSnapshot = nil
+        launchPlannerSnapshot = nil
         // A stale bind error must never leak into a later sign-in: the error
         // branch's sign-out is the only escape from a failed bind, and the
         // next beginSignIn clears on entry anyway — belt and braces.
