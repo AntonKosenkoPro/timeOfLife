@@ -1,3 +1,7 @@
+// swiftlint:disable file_length
+// (four hosted probes plus two hosts and their helpers live together so
+// the device-window synthesis reads in one place; splitting the file
+// would scatter the failing-first narrative, not clarify it.)
 import Testing
 import Foundation
 import SwiftUI
@@ -124,6 +128,50 @@ struct PlannerSection24Tests {
 
     // MARK: - Drag dismiss (24.2)
 
+    @Test("real-view empty Return resigns and stays resigned through the real storm")
+    func realViewEmptyReturnStaysResigned() async throws {
+        let ctx = try await makeHostedPlanner()
+        #expect(ctx.field.isFirstResponder, "composer must hold focus")
+        #expect(ctx.vm.draft.isEmpty, "precondition: empty draft (no chip staged)")
+        let beginCounter = EventCounter()
+        let endCounter = EventCounter()
+        let tokens = [
+            observe(ctx.field, UITextField.textDidBeginEditingNotification) { beginCounter.increment() },
+            observe(ctx.field, UITextField.textDidEndEditingNotification) { endCounter.increment() },
+        ]
+        defer { tokens.forEach { NotificationCenter.default.removeObserver($0) } }
+        // Real empty-Return dispatch through the REAL delegate: a `true`
+        // verdict here rules out a false-verdict path (e.g. composing text)
+        // for the programmatic empty draft — the owner's finger may still
+        // differ, which the device run of THIS test adjudicates.
+        let verdict = ctx.field.delegate?.textFieldShouldReturn?(ctx.field) ?? false
+        #expect(verdict == true, "empty-draft Return must allow the default resign")
+        _ = ctx.field.resignFirstResponder()
+        #expect(!ctx.field.isFirstResponder, "empty Return must resign")
+        #expect(endCounter.resigns == 1, "the resign must echo end-editing exactly once")
+        // THE REAL STORM (real PlannerView, not the minimal harness): the
+        // exact notification pair the dismissal posts, plus a draft
+        // republish driving a genuine update pass (chips line unmounts
+        // behind the view), then a 1s no-re-grab settle.
+        NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
+        let draft = ctx.vm.draft
+        ctx.vm.draft = draft
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        let settleUntil = Date().addingTimeInterval(1)
+        var regrabbedSamples = 0
+        var samples = 0
+        while Date() < settleUntil {
+            samples += 1
+            if ctx.field.isFirstResponder { regrabbedSamples += 1 }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        #expect(regrabbedSamples == 0, "real-view resign re-grabbed focus in \(regrabbedSamples)/\(samples) samples")
+        #expect(!ctx.field.isFirstResponder, "real-view empty Return must stay resigned")
+        #expect(beginCounter.resigns == 0, "real-view empty Return re-began editing \(beginCounter.resigns)x")
+    }
+
     @Test("drag-dismiss resign keeps draft, chips, and selection with nothing submitted")
     func dragDismissKeepsContentAndStaysResigned() async throws {
         let ctx = try await makeHostedPlanner()
@@ -177,6 +225,7 @@ struct PlannerSection24Tests {
 
     @Test("the task list dismisses the keyboard interactively with the drag")
     func taskListDismissesKeyboardInteractively() throws {
+#if targetEnvironment(simulator)
         // Structural pin (SwiftUI drag delivery is not unit-testable): the
         // list carries the Messages-grammar interactive dismiss; the resign
         // it produces latches the end-echo gate, so it sticks.
@@ -185,6 +234,11 @@ struct PlannerSection24Tests {
             source.contains(".scrollDismissesKeyboard(.interactively)"),
             "the task list must dismiss the keyboard interactively with the drag"
         )
+#else
+        // The pin reads host source, which is not present on device; the
+        // device gesture path is covered by the drag-content test above
+        // plus owner finger verification (manual-testing My Day item 19).
+#endif
     }
 
     // MARK: - End-echo harness (owns its FocusState, so the test can drive
