@@ -230,7 +230,7 @@ struct PlannerSection19Tests {
         // dismiss button — Return on an empty draft is the only
         // keyboard-dismiss path. A reintroduction of any token fails loudly
         // here; the empty-Return path stays pinned by the §18
-        // `emptyReturnDispatchResigns` test and valid-submit no-resign by
+        // `emptyReturnDispatchResignsExplicitly` test and valid-submit no-resign by
         // the 7.1 focus-lifetime suite.
         let row = try timeOfLifeSource(relativePath: "TimeOfLife/Features/Planner/Views/PlannerComposerRow.swift")
         #expect(!row.contains("PlannerComposerDismiss"), "the dismiss control must not come back")

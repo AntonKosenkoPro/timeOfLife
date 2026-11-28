@@ -233,6 +233,12 @@ struct PlannerView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        // Drag-to-dismiss (day-planner 24.2, Messages grammar): the scroll
+        // view resigns first responder interactively with the drag; the
+        // end-echo gate latches on the resign so it sticks, and no update
+        // pass re-acquires. Draft, chips, and staged selection are untouched
+        // — nothing submits.
+        .scrollDismissesKeyboard(.interactively)
         .accessibilityIdentifier("PlannerTaskList")
         // Reorder mode surfaces drag handles with no delete affordances:
         // without an on-delete handler the framework shows handles only.

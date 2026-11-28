@@ -129,17 +129,16 @@ struct PlannerSection18Tests {
         #expect(!PlannerComposerField.shouldResignOnReturn(text: "  Read  "))
     }
 
-    @Test("Return on an empty draft takes the default resign")
-    func emptyReturnDispatchResigns() async throws {
+    @Test("Return on an empty draft resigns the field itself")
+    func emptyReturnDispatchResignsExplicitly() async throws {
         let ctx = try await makeHostedPlanner()
-        // Empty draft: `true` lets the system resign — the ONLY
-        // submit-path resign allowed (day-planner 18.3). Calling the
-        // delegate directly exercises the verdict; the resign itself is
-        // UIKit default behavior (no custom code to pin).
-        let verdict = ctx.field.delegate?.textFieldShouldReturn?(ctx.field) ?? false
-        #expect(verdict == true, "empty-draft Return must allow the default resign")
-        // The resign after a `true` verdict fires end-editing (the 7.1
-        // suite proves valid submits never do).
+        // Empty draft: the field resigns ITSELF at dispatch and reports
+        // handled (day-planner 24.1) — UITextField performs NO default
+        // resign on Return, so a `true` verdict alone leaves the keyboard
+        // up (the Hold dismiss probe caught this on sim + device; hosted
+        // tests masked it by resigning manually after the verdict). The
+        // confirmation below observes the dispatch-driven end-editing with
+        // no manual resign in between.
         await confirmation("empty Return dismisses the keyboard", expectedCount: 1) { confirm in
             let token = NotificationCenter.default.addObserver(
                 forName: UITextField.textDidEndEditingNotification,
@@ -147,7 +146,8 @@ struct PlannerSection18Tests {
                 queue: nil
             ) { _ in confirm() }
             defer { NotificationCenter.default.removeObserver(token) }
-            _ = ctx.field.resignFirstResponder()
+            let verdict = ctx.field.delegate?.textFieldShouldReturn?(ctx.field) ?? true
+            #expect(verdict == false, "empty-draft Return is handled (explicit resign), not defaulted")
         }
     }
 
@@ -178,22 +178,23 @@ struct PlannerSection18Tests {
     func emptyReturnStaysResignedAcrossUpdates() async throws {
         let ctx = try await makeHostedPlanner()
         #expect(ctx.field.isFirstResponder, "composer must hold focus")
-        // Real dispatch (same selector the keyboard invokes): a `true`
-        // verdict lets UIKit resign — the only submit-path resign allowed.
-        let verdict = ctx.field.delegate?.textFieldShouldReturn?(ctx.field) ?? false
-        #expect(verdict == true, "empty-draft Return must allow the default resign")
-        // UIKit performs the default resign after a `true` verdict.
+        // Real dispatch (same selector the keyboard invokes): the field
+        // resigns ITSELF and reports handled (day-planner 24.1 — there is
+        // no UIKit default resign to allow). The manual resign below is a
+        // no-op documenting the old shape.
+        let verdict = ctx.field.delegate?.textFieldShouldReturn?(ctx.field) ?? true
+        #expect(verdict == false, "empty-draft Return resigns explicitly (handled, no default)")
         _ = ctx.field.resignFirstResponder()
         try? await Task.sleep(nanoseconds: 300_000_000)
         #expect(!ctx.field.isFirstResponder, "empty Return must resign")
-        // Device sequence (§22 root cause): the dismissal posts
-        // keyboardWillHide and publishes state behind the view — each pass
-        // runs `updateUIView`. Pre-fix the still-true focus intent re-grabs
-        // first responder on that pass, so the keyboard never visibly
-        // closes; the fix clears the intent at dispatch, so the field
-        // stays resigned. Show-then-hide guarantees two real update
-        // passes even when the sim never raised the software keyboard;
-        // the draft publish guarantees a third.
+        // Device sequence (day-planner 24.1 root cause, proven by the
+        // Hold dismiss probe): UITextField performs no default resign, so
+        // without the explicit resign the keyboard never starts dismissing;
+        // without the end-echo gate the resign-triggered update storm
+        // (editing mirror, keyboardWillHide, chips unmount) can re-grab
+        // first responder before the intent write flushes. Show-then-hide
+        // guarantees two real update passes even when the sim never raised
+        // the software keyboard; the draft publish guarantees a third.
         NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil)
         try? await Task.sleep(nanoseconds: 200_000_000)
         NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)

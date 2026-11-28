@@ -26,9 +26,14 @@ import UIKit
 /// instead: `textFieldDidEndEditing` latches a coordinator-owned gate and
 /// `updateUIView` honors it, so no update pass can re-acquire after ANY
 /// genuine resign (empty Return, drag, system) until a genuine begin
-/// unlatches it. The harness test below synthesizes the device window
-/// deterministically (genuine resign + update pass while the intent still
-/// reads true) — red without the gate, green with it.
+/// unlatches it. A second, load-bearing finding: UITextField performs NO
+/// default resign on Return — the dispatch itself must resign explicitly
+/// (the Hold dismiss probe proved a bare `true` verdict leaves the
+/// keyboard up on sim and device). The unit probes below synthesize the
+/// device window deterministically (genuine resign + update pass while
+/// the intent still reads true); the real-path verdict lives in the Hold
+/// dismiss probe, which is red without the explicit resign + gate and
+/// green with them.
 @MainActor
 @Suite("Planner section 24 (end-echo resign-sticks, drag dismiss)", .serialized)
 struct PlannerSection24Tests {
@@ -47,13 +52,17 @@ struct PlannerSection24Tests {
             observe(ctx.field, UITextField.textDidEndEditingNotification) { endCounter.increment() },
         ]
         defer { tokens.forEach { NotificationCenter.default.removeObserver($0) } }
-        // Real empty-Return dispatch through the REAL delegate: the verdict
-        // allows the default resign and submits nothing.
+        // Real empty-Return dispatch through the REAL delegate: the field
+        // resigns ITSELF and reports handled (no UIKit default resign
+        // exists — a bare `true` verdict leaves the keyboard up), and
+        // submits nothing.
         let verdict = ctx.field.delegate?.textFieldShouldReturn?(ctx.field) ?? false
-        #expect(verdict == true, "empty-draft Return must allow the default resign")
+        #expect(verdict == false, "empty-draft Return resigns explicitly (handled, no default)")
         #expect(control.returnCount == 0, "empty Return must not submit")
-        // The resign itself: UIKit default behavior after a `true` verdict.
-        // This fires the end-echo (`textFieldDidEndEditing`) for real.
+        // The resign itself fired INSIDE the dispatch (explicit resign at
+        // dispatch — there is no UIKit default to wait for); this already
+        // fired the end-echo (`textFieldDidEndEditing`) for real. The
+        // manual resign below is a no-op that documents the old shape.
         _ = ctx.field.resignFirstResponder()
         #expect(!ctx.field.isFirstResponder, "empty Return must resign")
         #expect(endCounter.resigns == 1, "the resign must echo end-editing exactly once")
@@ -76,8 +85,8 @@ struct PlannerSection24Tests {
         // ...and a later genuine resign re-latches (the gate is not one-shot).
         control.prose = ""
         try? await Task.sleep(nanoseconds: 100_000_000)
-        let relatchVerdict = ctx.field.delegate?.textFieldShouldReturn?(ctx.field) ?? false
-        #expect(relatchVerdict == true, "empty Return must allow the default resign again")
+        let relatchVerdict = ctx.field.delegate?.textFieldShouldReturn?(ctx.field) ?? true
+        #expect(relatchVerdict == false, "empty Return resigns explicitly again (handled, no default)")
         _ = ctx.field.resignFirstResponder()
         #expect(endCounter.resigns == 2, "the re-latch resign must echo end-editing again")
         await runStaleIntentStorm(
@@ -140,12 +149,11 @@ struct PlannerSection24Tests {
             observe(ctx.field, UITextField.textDidEndEditingNotification) { endCounter.increment() },
         ]
         defer { tokens.forEach { NotificationCenter.default.removeObserver($0) } }
-        // Real empty-Return dispatch through the REAL delegate: a `true`
-        // verdict here rules out a false-verdict path (e.g. composing text)
-        // for the programmatic empty draft — the owner's finger may still
-        // differ, which the device run of THIS test adjudicates.
-        let verdict = ctx.field.delegate?.textFieldShouldReturn?(ctx.field) ?? false
-        #expect(verdict == true, "empty-draft Return must allow the default resign")
+        // Real empty-Return dispatch through the REAL delegate: the field
+        // resigns ITSELF and reports handled (see the harness test), which
+        // rules out a false-verdict path for the programmatic empty draft.
+        let verdict = ctx.field.delegate?.textFieldShouldReturn?(ctx.field) ?? true
+        #expect(verdict == false, "empty-draft Return resigns explicitly (handled, no default)")
         _ = ctx.field.resignFirstResponder()
         #expect(!ctx.field.isFirstResponder, "empty Return must resign")
         #expect(endCounter.resigns == 1, "the resign must echo end-editing exactly once")

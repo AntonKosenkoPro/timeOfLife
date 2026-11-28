@@ -93,6 +93,7 @@ extension AppContainer {
         seedPlannerHeadersIfNeeded(screen: screen, localStore: localStore)
         seedPlannerWarmIfNeeded(screen: screen, localStore: localStore)
         seedPlannerNotesIfNeeded(screen: screen, localStore: localStore)
+        seedPlannerLongIfNeeded(screen: screen, localStore: localStore)
         seedZhFitIfNeeded(screen: screen, localStore: localStore)
         seedDeletionEvidence(keychain: keychain)
     }
@@ -149,12 +150,14 @@ extension AppContainer {
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
             navigation.path = []
-        case "plannerWarm", "plannerNotes":
+        case "plannerWarm", "plannerNotes", "plannerLong":
             // Day-planner probes on the signed-in shell; seeding is
             // per-screen (`seedPlannerWarmIfNeeded` plants §12's three
             // tasks for "plannerWarm"; `seedPlannerNotesIfNeeded` plants
-            // §15's tagged + annotated pair for "plannerNotes"). Seeded
-            // text is fixture copy, never user data.
+            // §15's tagged + annotated pair for "plannerNotes";
+            // `seedPlannerLongIfNeeded` plants §24's fifteen open tasks
+            // for "plannerLong"). Seeded text is fixture copy, never user
+            // data.
             signInShell(sessionStore: sessionStore, navigation: navigation)
         case "trackCategories":
             // Deterministic running-track fixture: the shell opens on Track
@@ -290,6 +293,33 @@ extension AppContainer {
                 }
             } catch {
                 seedLogger.error("UITest seed: plannerWarm threw: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Fifteen open tasks for the `"plannerLong"` screen (day-planner §24
+    /// drag-dismiss probe): a scrollable Today list, so a real drag scrolls
+    /// and the scroll-view dismiss fires. Same degrade-to-empty policy as
+    /// the History seeds: a failed seed leaves Today short, and the probe
+    /// fails loudly on the wrong counts instead of guessing.
+    private static func seedPlannerLongIfNeeded(screen: String, localStore: LocalStore) {
+        guard screen == "plannerLong" else { return }
+        Task {
+            do {
+                for i in 1...15 {
+                    let name = String(format: "Long %02d", i)
+                    let result = try await localStore.createPlannerTask(
+                        id: "uitest-long-\(i)", name: name,
+                        positionKey: String(format: "61%04d", i),
+                        operationID: UUID().uuidString
+                    )
+                    guard case .saved = result else {
+                        seedLogger.error("UITest seed: plannerLong task failed: \(name, privacy: .public)")
+                        return
+                    }
+                }
+            } catch {
+                seedLogger.error("UITest seed: plannerLong threw: \(error.localizedDescription, privacy: .public)")
             }
         }
     }

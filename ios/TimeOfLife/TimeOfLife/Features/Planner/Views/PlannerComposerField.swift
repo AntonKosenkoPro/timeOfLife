@@ -94,17 +94,35 @@ struct PlannerComposerField: UIViewRepresentable {
         uiView.accessibilityIdentifier = accessibilityIdentifier
         // Become-only, mirroring SwiftUI `.focused`: the binding asserts
         // focus (initial entry, chip tap) and the begin-echo keeps it
-        // truthful, so any update while unfocused re-asserts — unless the
-        // last Return cleared it (day-planner 22.1: the empty-draft resign
-        // disarms here, so the dismissal sticks). Resigns arrive
-        // solely from the system — nothing here ever resigns.
-        if focused.wrappedValue, !uiView.isFirstResponder {
+        // truthful — but the binding is an async focus-engine request, so
+        // a resign-triggered update storm can read a still-true intent.
+        // The end-echo gate (day-planner 24.1) blocks re-acquire after ANY
+        // genuine resign — empty Return, drag dismiss, system — until a
+        // genuine begin unlatches it. The §22 dispatch clear stays as
+        // defense in depth; the gate alone carries the device.
+        if focused.wrappedValue, !uiView.isFirstResponder, !context.coordinator.observedResign {
             _ = uiView.becomeFirstResponder()
         }
     }
 
     final class Coordinator: NSObject, UITextFieldDelegate {
         private var parent: PlannerComposerField
+        /// End-echo (day-planner 24.1): the last delegate-observed
+        /// first-responder state — ground truth. A `FocusState` write is a
+        /// focus-engine request, not a synchronous store set: the §22
+        /// dispatch write may not have flushed when the resign-triggered
+        /// update storm runs `updateUIView`, which then reads the
+        /// still-true intent and re-grabs — the keyboard never dismisses
+        /// (the Hold dismiss probe reproduced this on sim AND device with
+        /// the real keyboard path; hosted unit tests stay green either way
+        /// because no software keyboard presents in a unit host). A genuine
+        /// resign latches this; only a genuine begin unlatches it; update
+        /// passes never re-acquire while latched — every resign sticks,
+        /// whatever the flush timing. Harmless when spuriously latched
+        /// (e.g. a steal while focused): `becomeFirstResponder` is only
+        /// ever attempted while NOT first responder, and any real begin
+        /// clears the latch.
+        private(set) var observedResign = false
 
         init(_ parent: PlannerComposerField) {
             self.parent = parent
@@ -116,23 +134,28 @@ struct PlannerComposerField: UIViewRepresentable {
         }
 
         /// Return dispatch (day-planner 18.3, sole dismiss path since
-        /// 21.1): an empty draft takes the
-        /// default resign — the keyboard dismisses, the ONLY submit-path
-        /// resign allowed. Anything else submits WITHOUT resigning, so the
-        /// keyboard never animates away regardless of round-trip latency.
-        /// The verdict reads the field itself (ground truth at dispatch),
-        /// not the binding (which the in-flight keystroke may not have
-        /// echoed yet). The resign branch clears the focus intent
-        /// synchronously (day-planner 22.1): the become-only recovery in
-        /// `updateUIView` re-asserts while the intent reads true, and
-        /// `textFieldDidEndEditing` deliberately leaves it untouched — so
-        /// without this disarm the resign-triggered update storm can
-        /// re-grab first responder and the keyboard never visibly closes.
-        /// The valid-submit branch leaves the intent set (no-resign).
+        /// 21.1): an empty draft DISMISSES the keyboard — the only
+        /// submit-path resign allowed. Anything else submits WITHOUT
+        /// resigning, so the keyboard never animates away regardless of
+        /// round-trip latency. The verdict reads the field itself (ground
+        /// truth at dispatch), not the binding (which the in-flight
+        /// keystroke may not have echoed yet). The resign is EXPLICIT
+        /// (day-planner 24.1 fix): UITextField performs NO default resign
+        /// on Return — a `true` verdict alone leaves the keyboard up, which
+        /// is exactly what the Hold dismiss probe caught on sim and device
+        /// (the §18/§22 hosted tests masked it by resigning manually after
+        /// the verdict). So the empty branch resigns the field itself and
+        /// returns `false` (handled — there is no default to suppress).
+        /// The resign branch also clears the focus intent synchronously
+        /// (§22 write, kept as defense in depth); what keeps the dismissal
+        /// stuck is the end-echo gate latched by `textFieldDidEndEditing`
+        /// (day-planner 24.1). The valid-submit branch leaves the intent
+        /// set and never resigns (no-resign).
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
             if PlannerComposerField.shouldResignOnReturn(text: textField.text ?? "") {
                 parent.focused.wrappedValue = false
-                return true
+                textField.resignFirstResponder()
+                return false
             }
             parent.onReturn()
             return false
@@ -140,22 +163,28 @@ struct PlannerComposerField: UIViewRepresentable {
 
         /// Echoes focus INTO the binding only: the binding asserts focus
         /// (initial entry, chip tap, steal recovery) but never
-        /// relinquishes it — resigns arrive solely from the system, and the
-        /// next update re-asserts (see `updateUIView`). No end-echo: writing
-        /// `false` here would disarm that recovery and strand the field
-        /// unfocused after any steal. The UIKit editing state itself is
-        /// reported separately through `onEditingChanged` (the binding
-        /// never observes UIKit-side focus back, so it cannot drive
-        /// visibility).
+        /// relinquishes it — resigns arrive solely from the system. The
+        /// unlatch here is the other half of the end-echo (day-planner
+        /// 24.1): a genuine begin is the ONLY thing that re-arms
+        /// re-acquire after a genuine resign — the user refocusing is what
+        /// releases the gate, never an update pass. The UIKit editing
+        /// state itself is reported separately through `onEditingChanged`
+        /// (the binding never observes UIKit-side focus back, so it cannot
+        /// drive visibility).
         func textFieldDidBeginEditing(_ textField: UITextField) {
+            observedResign = false
             parent.focused.wrappedValue = true
             parent.onEditingChanged(true)
         }
 
-        /// Mirrors UIKit-side resign into the editing state (visibility
-        /// only — the `focused` binding is deliberately left untouched so
-        /// the become-only recovery in `updateUIView` keeps working).
+        /// End-echo, latching half (day-planner 24.1): mirrors the
+        /// UIKit-side resign into the editing state (visibility) AND latches
+        /// the observed resign, so the next update pass cannot re-acquire
+        /// (see `updateUIView`). The `focused` binding is deliberately left
+        /// for the §22 dispatch write / SwiftUI reconcile — the gate alone
+        /// decides re-acquire.
         func textFieldDidEndEditing(_ textField: UITextField) {
+            observedResign = true
             parent.onEditingChanged(false)
         }
     }
